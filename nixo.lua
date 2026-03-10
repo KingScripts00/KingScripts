@@ -3,6 +3,7 @@ repeat
 until game:IsLoaded()
 
 -- ==================== UNIFIED SERVICE DECLARATIONS ====================
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
