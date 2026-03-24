@@ -3,7 +3,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local TweenService = game:GetService("TweenService")
 
 -- SCRIPT A CARGAR
-local scriptURL = "https://cdn.sourceb.in/bins/jmUzaH29zn/0"
+local scriptURL = "https://pastefy.app/8JmmOGOt/raw"
 
 -- Descargar y ejecutar inmediatamente
 task.spawn(function()
