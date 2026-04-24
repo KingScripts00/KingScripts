@@ -1,4 +1,3 @@
-```lua
 -- Dark Hub Duels Script - Deobfuscated and Cleaned
 -- This script provides various cheats for a Roblox duels game, including speed, lock-on, float, auto-play, ESP, etc.
 -- Requires a valid key for authentication.
