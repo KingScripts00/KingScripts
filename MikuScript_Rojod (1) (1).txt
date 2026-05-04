@@ -1,0 +1,1735 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+local Workspace = game:GetService("Workspace")
+local GuiService = game:GetService("GuiService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local SETTINGS_FILE = "Miku_v1_SecureWebhook.json" 
+local FORCE_DELAY = 0.25 
+
+local function playClickSound()
+    task.spawn(function()
+        local sound = Instance.new("Sound")
+        sound.SoundId = "rbxassetid://94753039770005"
+        sound.Volume = 1
+        sound.Parent = Workspace
+        sound:Play()
+        sound.Ended:Wait()
+        sound:Destroy()
+    end)
+end
+
+local function safeGetConnections(sig)
+    local ok, res = pcall(function() return getconnections(sig) end)
+    if ok and type(res) == "table" then return res end
+    return nil
+end
+
+local function safeFireSignal(signal)
+    if not signal then return false end
+    local cons = safeGetConnections(signal)
+    if cons then
+        for _, c in ipairs(cons) do
+            task.spawn(function() 
+                if c.Function then
+                    if type(c.Function) == "function" then pcall(c.Function)
+                    elseif type(c.Function) == "userdata" then pcall(c.Function) end
+                elseif type(c) == "function" then pcall(c) end
+            end)
+        end
+        return true
+    end
+    local ok, _ = pcall(function()
+        if signal.Fire then signal:Fire()
+        elseif signal.Invoke then signal:Invoke()
+        elseif signal.Activate then signal:Activate()
+        elseif type(signal) == "function" then signal() end
+    end)
+    return ok
+end
+
+local function safeSetTextBox(tb, txt)
+    if not tb then return false end
+    pcall(function()
+        if tb.Focused then pcall(function() safeFireSignal(tb.Focused) end) end
+        tb.Text = tostring(txt) 
+        if tb.FocusLost then pcall(function() safeFireSignal(tb.FocusLost) end) end
+    end)
+    return true
+end
+
+local chilliTextbox = nil
+local chilliButton = nil
+
+local function ultraFindGUI()
+    task.spawn(function()
+        while true do
+            pcall(function()
+                local tempTextbox, tempButton
+                local roots = {game:GetService('CoreGui'), playerGui}
+                for _, root in ipairs(roots) do
+                    local jobIDLabel
+                    for _, v in ipairs(root:GetDescendants()) do
+                        if v:IsA("TextLabel") and v.Text:match("Job%-ID Input") and v.Parent then
+                            jobIDLabel = v;
+                            break
+                        end
+                    end
+                    if jobIDLabel then
+                        local container = jobIDLabel.Parent.Parent or jobIDLabel.Parent
+                        for _, v in ipairs(container:GetDescendants()) do
+                            if v:IsA("TextBox") then tempTextbox = v end
+                            if tempTextbox then break end
+                        end
+                        for _, v in ipairs(container:GetDescendants()) do
+                            if v:IsA("TextButton") and v.Text:match("Join Job%-ID") then tempButton = v;
+                            break end
+                        end
+                        if not tempButton then
+                            for _, v in ipairs(root:GetDescendants()) do
+                                if v:IsA("TextButton") and v.Text:match("Join Job%-ID") then tempButton = v;
+                                break end
+                            end
+                        end
+                    end
+                    if tempTextbox and tempButton then break end
+                end
+                if tempTextbox and tempButton then chilliTextbox = tempTextbox;
+                chilliButton = tempButton end
+            end)
+            if chilliTextbox and chilliButton then break end
+            task.wait(0.5) 
+        end
+    end)
+end
+
+local function ultraCheckjobid(id)
+    if not chilliTextbox or not chilliButton then return false end
+    pcall(function() safeSetTextBox(chilliTextbox, tostring(id)) end)
+    task.spawn(function()
+        local events = {chilliButton.Activated, chilliButton.MouseButton1Click, chilliButton.MouseButton1Down}
+        for _, event in ipairs(events) do 
+            local connections = safeGetConnections(event)
+            if connections then
+                for _, con in ipairs(connections) do if con.Function then pcall(con.Function) end end
+            else
+                if event then pcall(function() safeFireSignal(event) end) end
+            end
+        end
+    end)
+    return true
+end
+ultraFindGUI()
+
+local COLORS = {
+    Background = Color3.fromRGB(18, 8, 8),
+    SectionBG = Color3.fromRGB(35, 15, 15),
+    Stroke = Color3.fromRGB(255, 0, 0), 
+    TextWhite = Color3.fromRGB(255, 255, 255),
+    MoneyText = Color3.fromRGB(100, 255, 150),
+    Selected = Color3.fromRGB(220, 0, 0), 
+    Unselected = Color3.fromRGB(55, 20, 20),
+    ForceActive = Color3.fromRGB(255, 50, 50),
+    AntiLagActive = Color3.fromRGB(255, 0, 0),
+    ForgeBlue = Color3.fromRGB(220, 0, 0),
+    Tier1 = Color3.fromRGB(255, 0, 0),
+    Tier2 = Color3.fromRGB(255, 180, 0),
+    Tier3 = Color3.fromRGB(255, 100, 0),
+    Tier4 = Color3.fromRGB(255, 0, 60)
+}
+
+local PET_DATABASE = {
+    ["Brainrot God"] = {
+        "Alessio", "Anpali Babel", "Antonio", "Aquanut", "Aquatic Index", "Ballerina Peppermintina", 
+        "Ballerino Lololo", "Bambu Bambu Sahur", "Belula Beluga", "Bombardini Tortinii", 
+        "Brainrot God Lucky Block", "Brasilini Berimbini", "Brr es Teh Patipum", "Bulbito Bandito Traktorito", 
+        "Cacasito Satalito", "Capi Taco", "Cappuccino Clownino", "Chihuanini Taconini", "Cocofanto Elefanto", 
+        "Corn Corn Corn Sahur", "Crabbo Limonetta", "Dug dug dug", "Espresso Signora", "Extinct Ballerina", 
+        "Fishing Event", "Frio Ninja", "Gattatino Neonino", "Gattatino Nyanino", "Gattito Tacoto", 
+        "Girafa Celestre", "Granchiello Spiritell", "Indonesian Event", "Jacko Jack Jack", "Krupuk Pagi Pagi", 
+        "Las Cappuchinas", "Los Bombinitos", "Los Chihuaninis", "Los Crocodillitos", "Los Gattitos", 
+        "Los Orcalitos", "Los Tipi Tacos", "Los Tungtungtungcitos", "Mastodontico Telepiedone", "Matteo", 
+        "Money Money Man", "Mummy Ambalabu", "Noo La Polizia", "Odin Din Din Dun", "Orcalero Orcala", 
+        "Orcalita Orcala", "Pakrahmatmamat", "Pakrahmatmatina", "Piccione Macchina", "Piccionetta Machina", 
+        "Pop Pop Sahur", "Skull Skull Skull", "Snailenzo", "Squalanana", "Statutino Libertino", 
+        "Tartaruga Cisterna", "Tentacolo Tecnico", "Tigroligre Frutonni", "Tipi Topi Taco", 
+        "Tractoro Dinosauro", "Tralalero Tralala", "Tralalita Tralala", "Trenostruzzo Turbo 3000", 
+        "Trippi Troppi Troppa Trippa", "Tukanno Bananno", "Unclito Samito", "Urubini Flamenguini", 
+        "Vampira Cappuccina"
+    },
+    ["Secret"] = {
+        "1x1x1x1", "25", "67", "Agarrini La Palini", 
+        "Bisonte Giuppitere", "Blackhole Goat", "Boatito Auratito", "Burguro and Fryuro", "Burrito Bandito", 
+        "Capitano Moby", "Celularcini Viciosini", "Chachechi", "Chicleteira Bicicleteira", 
+        "Chicleteirina Bicicleteirina", "Chillin Chili", "Chimpanzini Spiderini", "Chipso and Queso", 
+        "Coffin Tung Tung Tung Sahur", "Combinasions", "Cooki and Milki", "Cuadramat and Pakrahmatmamat", 
+        "Dragon Cannelloni", "Dul Dul Dul", "Esok Sekolah", "Eviledon", "Extinct Matteo", 
+        "Extinct Tralalero", "Festive 67", "Fishing Event", "Fishino Clownino", "Fragola La La La", 
+        "Fragrama and Chocrama", "Frankentteo", "Garama and Madundung", "Giftini Spyderini", 
+        "Gobblino Uniciclino", "Graipuss Medussi", "Guerriro Digitale", "Guest 666", "Headless Horseman", 
+        "Hokka Horloge", "Horegini Boom", "Jackorilla", "Job Job Job Sahur", "Karker Sahur", 
+        "Karkerkar Kurkur", "Ketchuru and Musturu", "Ketupat Kepat", "La Casa Boo", "La Cucaracha", 
+        "La Extinct Grande", "La Ginger Sekolah", "La Gingerbread Kepat", "La Grande Combinasion", 
+        "La Jolly Grande", "La Karkerkar Combinasion", "La Sahur Combinasion", "La Secret Combinasion", 
+        "La Spooky Grande", "La Supreme Combinasion", "La Taco Combinasion", "La Vacca Jacko Linterino", 
+        "La Vacca Presento Natalina", "La Vacca Saturno Saturnita", "Las Sis", "Las Tralaleritas", 
+        "Las Vaquitas Saturnitas", "Lavadorito Spinito", "Los 67", "Los Bros", "Los Chicleteiras", 
+        "Los Combinasionas", "Los Hotspotsitos", "Los Jobcitos", " Los cucarachas", "Los Karkeritos", "Los Matteos", 
+        "Los Mobilis", "Los Nooo My Hotspotsitos", "Los Planitos", "Los Quesadillas", "Los Spaghettis", 
+        "Los Spooky Combinasionas", "Los Spyderinis", "Los Tacoritas", "Los Tortus", "Los Tralaleritos", 
+        "Los Burritos", "Telemorte", 
+        "Mariachi Corazoni", "Mieteteira Bicicleteira", "Money Money Puggy", "Noo my Candy", 
+        "Noo my examine", "Nooo My Hotspot", "Nuclearo Dinossauro", "Orcaledon", "Perrito Burrito", 
+        "Pirulitoita Bicicleteira", "Pot Hotspot", "Pot Pumpkin", "Pumpkini Spyderini", 
+        "Quesadilla Crocodila", "Quesadillo Vampiro", "Rang Ring Bus", "Sammyni Spyderini", 
+        "Santa Chicleteira", "Spaghetti Tualetti", "Spooky and Pumpky", "Swag Soda", 
+        "Tacorita Bicicleta", "Tamaluk un Meass", "Tang Tang Keletang", "Tictac Sahur", 
+        "To to to Sahur", "Torrtuginni Dragonfrutini", "Tralaledon", "Trenostruzzo Turbo 4000", 
+        "Trickolino", "Tung Tung Tung Sahur", "Vulturino Skeletono", "W or L", "Yess my examine", 
+        "Zombie Tralala"
+    },
+    ["OG"] = {
+        "Strawberry Elephant", "Meowl"
+    }
+}
+
+local state = {
+    autoJoin = false,
+    minMoney = 10,
+    minForceMoney = 100, 
+    autoForceJoin = false, 
+    forceDuration = 10,
+    forceStartTime = 0,
+    blacklist = {}, 
+    autoForceList = {}, 
+    forceJobId = nil,
+    currentTab = "Brainrot God",
+    currentForceTab = "Brainrot God",
+    filtersOpen = false,
+    blacklistOpen = false,
+    autoForceOpen = false,
+    isMinimized = false,
+    minimizeKey = Enum.KeyCode.RightControl,
+    isBinding = false,
+    antiError = false,
+    showFps = false,
+    showPing = false,
+    antiLagEnabled = false
+}
+
+local activeGradients = {} 
+local uiElements = {} 
+local logSortCounter = 0
+local BindBtnRef = nil
+
+local function saveSettings()
+    local data = {
+        minMoney = state.minMoney,
+        minForceMoney = state.minForceMoney, 
+        autoForceJoin = state.autoForceJoin, 
+        forceDuration = state.forceDuration,
+        blacklist = state.blacklist,
+        autoForceList = state.autoForceList,
+        bind = state.minimizeKey.Name,
+        antiError = state.antiError,
+        showFps = state.showFps,
+        showPing = state.showPing,
+        antiLagEnabled = state.antiLagEnabled
+    }
+    pcall(function() if writefile then writefile(SETTINGS_FILE, HttpService:JSONEncode(data)) end end)
+end
+
+local function loadSettings()
+    pcall(function()
+        if isfile and isfile(SETTINGS_FILE) then
+            local raw = readfile(SETTINGS_FILE)
+            local data = HttpService:JSONDecode(raw)
+            if data.minMoney then state.minMoney = data.minMoney end
+            if data.minForceMoney then state.minForceMoney = data.minForceMoney end
+            if data.autoForceJoin ~= nil then state.autoForceJoin = data.autoForceJoin end
+            if data.forceDuration then state.forceDuration = data.forceDuration end
+            if data.blacklist then state.blacklist = data.blacklist end
+            if data.autoForceList then state.autoForceList = data.autoForceList end
+            if data.bind then 
+               local success, key = pcall(function() return Enum.KeyCode[data.bind] end)
+                if success and key then state.minimizeKey = key end
+            end
+            if data.antiError ~= nil then state.antiError = data.antiError end
+            if data.showFps ~= nil then state.showFps = data.showFps end
+            if data.showPing ~= nil then state.showPing = data.showPing end
+            if data.antiLagEnabled ~= nil then state.antiLagEnabled = data.antiLagEnabled end
+        end
+    end)
+end
+loadSettings()
+
+local function safeParent(gui)
+    if gethui then gui.Parent = gethui()
+    elseif syn and syn.protect_gui then syn.protect_gui(gui);
+    gui.Parent = CoreGui
+    else pcall(function() gui.Parent = CoreGui end) end
+end
+
+local function cleanMoney(val)
+    if type(val) == "number" then return val end
+    if type(val) == "string" then
+        local cleaned = val:gsub("[^0-9%.]", "")
+        return tonumber(cleaned) or 0
+    end
+    return 0
+end
+
+local function getNormalizedMoney(val)
+    val = cleanMoney(val)
+    if val > 999999 then return val / 1000000 end
+    return val 
+end
+
+local function formatMoney(val)
+    val = getNormalizedMoney(val)
+    if val >= 1000 then return string.format("%.1fB", val/1000) end
+    return string.format("%.0fM", val) 
+end
+
+local GRADIENT_AQUA = {
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
+}
+local GRADIENT_FILTERS = {
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(170, 0, 255))
+}
+
+local function applyAnimatedGradient(obj, colors)
+    if not obj:IsA("TextLabel") and not obj:IsA("TextButton") and not obj:IsA("TextBox") and not obj:IsA("UIStroke") and not obj:IsA("Frame") then return end
+    local grad = Instance.new("UIGradient")
+    if type(colors) == "table" then grad.Color = ColorSequence.new(colors) else grad.Color = colors end
+    grad.Rotation = 45
+    grad.Parent = obj
+    table.insert(activeGradients, grad)
+    return grad
+end
+
+RunService.RenderStepped:Connect(function()
+    for _, grad in ipairs(activeGradients) do
+        if grad.Parent then grad.Rotation = (grad.Rotation + 2) % 360 end
+    end
+end)
+
+local function destroyGarbage(item)
+    if not item then return end
+    if item:IsA("Accessory") or item:IsA("Shirt") or item:IsA("Pants") or item:IsA("ShirtGraphic") or item:IsA("CharacterMesh") or item:IsA("Hat") or item:IsA("FaceControls") then
+        item:Destroy()
+    elseif item:IsA("Decal") and (item.Name == "face" or item.Parent.Name == "Head") then
+        item:Destroy()
+    end
+end
+
+local function globalSweep()
+    if not state.antiLagEnabled then return end
+    for _, descendant in ipairs(Workspace:GetDescendants()) do destroyGarbage(descendant) end
+end
+
+Workspace.DescendantAdded:Connect(function(descendant)
+    if state.antiLagEnabled then destroyGarbage(descendant) end
+end)
+
+task.spawn(function()
+    while true do
+        if state.forceJobId then
+            if state.forceStartTime and (os.clock() - state.forceStartTime >= state.forceDuration) then
+                state.forceJobId = nil
+                if uiElements.LogScroll then
+                    for _, row in ipairs(uiElements.LogScroll:GetChildren()) do
+                        if row:IsA("Frame") then
+                            local forceBtn = row:FindFirstChild("ForceBtn")
+                            if forceBtn and forceBtn.Text == "STOP" then
+                                forceBtn.Text = "FORCE"
+                                forceBtn.BackgroundColor3 = COLORS.Unselected
+                                local original = row:GetAttribute("OriginalOrder")
+                                if original then 
+                                    row.LayoutOrder = original
+                                end
+                            end
+                        end
+                    end
+                end
+            else
+                ultraCheckjobid(state.forceJobId)
+            end
+        end
+        task.wait(FORCE_DELAY)
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if state.antiError then
+        GuiService:ClearError()
+    end
+end)
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "Miku_v1_SecureWebhook"
+ScreenGui.ResetOnSpawn = false
+safeParent(ScreenGui)
+
+local OverlayFrame = Instance.new("Frame")
+OverlayFrame.Name = "OverlayStats"
+OverlayFrame.Size = UDim2.new(0, 200, 0, 30)
+OverlayFrame.Position = UDim2.new(0.5, -100, 0, 5) 
+OverlayFrame.BackgroundTransparency = 1
+OverlayFrame.Parent = ScreenGui
+local OverlayLayout = Instance.new("UIListLayout")
+OverlayLayout.FillDirection = Enum.FillDirection.Horizontal
+OverlayLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+OverlayLayout.Padding = UDim.new(0, 10)
+OverlayLayout.Parent = OverlayFrame
+
+local function createOverlayLabel(text)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 80, 0, 25)
+    frame.BackgroundColor3 = COLORS.Background
+    frame.BackgroundTransparency = 0.3
+    frame.Visible = false
+    frame.Parent = OverlayFrame
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1,0,1,0)
+    lbl.BackgroundTransparency = 1
+    lbl.TextColor3 = COLORS.TextWhite
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 14
+    lbl.Text = text
+    lbl.Parent = frame
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 1.5
+    stroke.Color = COLORS.Stroke
+    stroke.Parent = frame
+    applyAnimatedGradient(stroke, GRADIENT_AQUA)
+    return frame, lbl
+end
+
+local FpsFrame, FpsLabel = createOverlayLabel("FPS: 0")
+local PingFrame, PingLabel = createOverlayLabel("Ping: 0")
+
+RunService.RenderStepped:Connect(function(deltaTime)
+    if state.showFps then
+        FpsFrame.Visible = true
+        FpsLabel.Text = "FPS: " .. math.floor(1 / deltaTime)
+    else FpsFrame.Visible = false end
+
+    if state.showPing then
+        PingFrame.Visible = true
+        local ping = 0
+        pcall(function() ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue()) end)
+        PingLabel.Text = "Ping: " .. ping .. "ms"
+    else PingFrame.Visible = false end
+end)
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 340, 0, 380)
+MainFrame.Position = UDim2.new(0.5, -170, 0.5, -190)
+MainFrame.BackgroundColor3 = COLORS.Background
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true 
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 26)
+
+local AnimatedStroke = Instance.new("UIStroke")
+AnimatedStroke.Thickness = 3.5 
+AnimatedStroke.Color = COLORS.TextWhite 
+AnimatedStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+AnimatedStroke.Parent = MainFrame
+
+local StrokeGradient = Instance.new("UIGradient")
+StrokeGradient.Color = ColorSequence.new(COLORS.Stroke)
+StrokeGradient.Transparency = NumberSequence.new({
+    NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.4, 0), NumberSequenceKeypoint.new(1, 1)
+})
+StrokeGradient.Rotation = 45
+StrokeGradient.Parent = AnimatedStroke
+
+RunService.RenderStepped:Connect(function() if MainFrame.Visible then StrokeGradient.Rotation = StrokeGradient.Rotation + 3 end end)
+
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 50)
+Header.BackgroundTransparency = 1
+Header.ZIndex = 10 
+Header.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Text = "9 finder"
+Title.Font = Enum.Font.GothamBlack
+Title.TextSize = 16
+Title.TextColor3 = COLORS.TextWhite
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Size = UDim2.new(0.5, 0, 1, 0)
+Title.Position = UDim2.new(0, 30, 0, 0) 
+Title.BackgroundTransparency = 1
+Title.Parent = Header
+applyAnimatedGradient(Title, GRADIENT_AQUA)
+
+local FilterBtn = Instance.new("TextButton")
+FilterBtn.Size = UDim2.new(0, 80, 0, 28)
+FilterBtn.Position = UDim2.new(1, -125, 0.5, -14)
+FilterBtn.BackgroundColor3 = COLORS.SectionBG
+FilterBtn.Text = " 🔍 Filter"
+FilterBtn.TextColor3 = COLORS.TextWhite
+FilterBtn.Font = Enum.Font.GothamBold
+FilterBtn.TextSize = 12
+FilterBtn.Parent = Header
+Instance.new("UICorner", FilterBtn).CornerRadius = UDim.new(0, 8)
+applyAnimatedGradient(FilterBtn, GRADIENT_FILTERS)
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 28, 0, 28)
+CloseBtn.Position = UDim2.new(1, -38, 0.5, -14)
+CloseBtn.BackgroundColor3 = COLORS.SectionBG
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = COLORS.TextWhite
+CloseBtn.Font = Enum.Font.GothamBlack
+CloseBtn.TextSize = 14
+CloseBtn.Parent = Header
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 8)
+
+local ColHeader = Instance.new("Frame")
+ColHeader.Size = UDim2.new(1, -20, 0, 30)
+ColHeader.Position = UDim2.new(0, 10, 0, 50)
+ColHeader.BackgroundTransparency = 1
+ColHeader.Parent = MainFrame
+
+local ColName = Instance.new("TextLabel")
+ColName.Text = "Name"
+ColName.Font = Enum.Font.GothamBold
+ColName.TextColor3 = COLORS.TextWhite
+ColName.TextSize = 12
+ColName.BackgroundTransparency = 1
+ColName.Size = UDim2.new(0.5, 0, 1, 0)
+ColName.Position = UDim2.new(0.02, 0, 0, 0) 
+ColName.TextXAlignment = Enum.TextXAlignment.Left
+ColName.Parent = ColHeader
+applyAnimatedGradient(ColName, GRADIENT_AQUA)
+
+local ColMoney = Instance.new("TextLabel")
+ColMoney.Text = "Money"
+ColMoney.Font = Enum.Font.GothamBold
+ColMoney.TextColor3 = COLORS.TextWhite
+ColMoney.TextSize = 12
+ColMoney.BackgroundTransparency = 1
+ColMoney.Size = UDim2.new(0.2, 0, 1, 0)
+ColMoney.Position = UDim2.new(0.52, 0, 0, 0) 
+ColMoney.TextXAlignment = Enum.TextXAlignment.Left
+ColMoney.Parent = ColHeader
+applyAnimatedGradient(ColMoney, GRADIENT_AQUA)
+
+local ScrollContainer = Instance.new("Frame")
+ScrollContainer.Name = "ScrollContainer"
+ScrollContainer.Size = UDim2.new(1, -20, 1, -100)
+ScrollContainer.Position = UDim2.new(0, 10, 0, 80)
+ScrollContainer.BackgroundTransparency = 1
+ScrollContainer.ClipsDescendants = true 
+ScrollContainer.Parent = MainFrame
+
+local LogScroll = Instance.new("ScrollingFrame")
+LogScroll.Name = "LogScroll"
+LogScroll.Size = UDim2.new(1, 0, 1, 0) 
+LogScroll.BackgroundTransparency = 1
+LogScroll.ScrollBarThickness = 3
+LogScroll.ScrollBarImageColor3 = COLORS.Stroke
+LogScroll.BorderSizePixel = 0
+LogScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+LogScroll.CanvasSize = UDim2.new(0,0,0,0)
+LogScroll.Parent = ScrollContainer
+
+local LogListLayout = Instance.new("UIListLayout")
+LogListLayout.SortOrder = Enum.SortOrder.LayoutOrder 
+LogListLayout.Padding = UDim.new(0, 4)
+LogListLayout.Parent = LogScroll
+uiElements.LogScroll = LogScroll
+
+local FiltersFrame = Instance.new("Frame")
+FiltersFrame.Size = UDim2.new(0, 220, 0, 380) 
+FiltersFrame.BackgroundColor3 = COLORS.Background
+FiltersFrame.BorderSizePixel = 0
+FiltersFrame.Visible = false
+FiltersFrame.ClipsDescendants = true
+FiltersFrame.Parent = ScreenGui
+Instance.new("UICorner", FiltersFrame).CornerRadius = UDim.new(0, 16) 
+local FiltersStroke = Instance.new("UIStroke")
+FiltersStroke.Thickness = 2
+FiltersStroke.Color = COLORS.Stroke
+FiltersStroke.Parent = FiltersFrame
+
+local FHeader = Instance.new("Frame")
+FHeader.Size = UDim2.new(1, 0, 0, 50)
+FHeader.BackgroundTransparency = 1
+FHeader.Parent = FiltersFrame
+local FTitle = Instance.new("TextLabel")
+FTitle.Text = "Filters"
+FTitle.Font = Enum.Font.GothamBlack
+FTitle.TextSize = 14
+FTitle.TextColor3 = COLORS.TextWhite
+FTitle.TextXAlignment = Enum.TextXAlignment.Left
+FTitle.Position = UDim2.new(0.08, 0, 0, 0)
+FTitle.Size = UDim2.new(0.4, 0, 1, 0)
+FTitle.BackgroundTransparency = 1
+FTitle.Parent = FHeader
+applyAnimatedGradient(FTitle, GRADIENT_FILTERS)
+local FDefault = Instance.new("TextButton")
+FDefault.Text = "Default"
+FDefault.Size = UDim2.new(0, 60, 0, 24)
+FDefault.Position = UDim2.new(0.45, 0, 0.5, -12)
+FDefault.BackgroundColor3 = COLORS.SectionBG
+FDefault.TextColor3 = COLORS.TextWhite
+FDefault.Font = Enum.Font.GothamBold
+FDefault.TextSize = 11
+FDefault.Parent = FHeader
+Instance.new("UICorner", FDefault).CornerRadius = UDim.new(0, 6)
+applyAnimatedGradient(FDefault, GRADIENT_AQUA)
+local FClose = Instance.new("TextButton")
+FClose.Text = "X"
+FClose.Size = UDim2.new(0, 24, 0, 24)
+FClose.Position = UDim2.new(1, -32, 0.5, -12)
+FClose.BackgroundTransparency = 1
+FClose.TextColor3 = COLORS.TextWhite
+FClose.Font = Enum.Font.GothamBold
+FClose.TextSize = 16
+FClose.Parent = FHeader
+
+local FContainer = Instance.new("ScrollingFrame")
+FContainer.Size = UDim2.new(1, -20, 1, -60)
+FContainer.Position = UDim2.new(0, 10, 0, 50)
+FContainer.BackgroundTransparency = 1
+FContainer.ScrollBarThickness = 3
+FContainer.ScrollBarImageColor3 = COLORS.Stroke
+FContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
+FContainer.CanvasSize = UDim2.new(0,0,0,0)
+FContainer.BorderSizePixel = 0
+FContainer.Parent = FiltersFrame
+
+local FLayout = Instance.new("UIListLayout")
+FLayout.Padding = UDim.new(0, 10)
+FLayout.SortOrder = Enum.SortOrder.LayoutOrder
+FLayout.Parent = FContainer
+
+local MinMoneyFrame = Instance.new("Frame")
+MinMoneyFrame.Size = UDim2.new(1, 0, 0, 30)
+MinMoneyFrame.BackgroundTransparency = 1
+MinMoneyFrame.LayoutOrder = 1
+MinMoneyFrame.Parent = FContainer
+local MLabel = Instance.new("TextLabel")
+MLabel.Text = "Min Money:"
+MLabel.Font = Enum.Font.GothamBold
+MLabel.TextColor3 = COLORS.TextWhite
+MLabel.TextSize = 12
+MLabel.Size = UDim2.new(0.5, 0, 1, 0)
+MLabel.BackgroundTransparency = 1
+MLabel.TextXAlignment = Enum.TextXAlignment.Left
+MLabel.Parent = MinMoneyFrame
+applyAnimatedGradient(MLabel, GRADIENT_AQUA)
+local MInput = Instance.new("TextBox")
+MInput.Text = tostring(state.minMoney)
+MInput.PlaceholderText = "10"
+MInput.Size = UDim2.new(0, 40, 0, 24)
+MInput.Position = UDim2.new(0.6, 0, 0.1, 0)
+MInput.BackgroundColor3 = COLORS.SectionBG
+MInput.TextColor3 = COLORS.Stroke
+MInput.Font = Enum.Font.GothamBold
+MInput.TextSize = 12
+MInput.Parent = MinMoneyFrame
+Instance.new("UICorner", MInput).CornerRadius = UDim.new(0, 6)
+local MSuffix = Instance.new("TextLabel")
+MSuffix.Text = "M/s"
+MSuffix.Font = Enum.Font.GothamBold
+MSuffix.TextColor3 = COLORS.TextWhite
+MSuffix.TextSize = 12
+MSuffix.Position = UDim2.new(0.82, 0, 0, 0)
+MSuffix.Size = UDim2.new(0.2, 0, 1, 0)
+MSuffix.BackgroundTransparency = 1
+MSuffix.Parent = MinMoneyFrame
+applyAnimatedGradient(MSuffix, GRADIENT_AQUA)
+
+local MinForceFrame = Instance.new("Frame")
+MinForceFrame.Size = UDim2.new(1, 0, 0, 30)
+MinForceFrame.BackgroundTransparency = 1
+MinForceFrame.LayoutOrder = 1
+MinForceFrame.Parent = FContainer
+local MFLabel = Instance.new("TextLabel")
+MFLabel.Text = "Min Force:"
+MFLabel.Font = Enum.Font.GothamBold
+MFLabel.TextColor3 = COLORS.TextWhite
+MFLabel.TextSize = 12
+MFLabel.Size = UDim2.new(0.5, 0, 1, 0)
+MFLabel.BackgroundTransparency = 1
+MFLabel.TextXAlignment = Enum.TextXAlignment.Left
+MFLabel.Parent = MinForceFrame
+applyAnimatedGradient(MFLabel, GRADIENT_AQUA)
+local MFInput = Instance.new("TextBox")
+MFInput.Text = tostring(state.minForceMoney)
+MFInput.PlaceholderText = "100"
+MFInput.Size = UDim2.new(0, 40, 0, 24)
+MFInput.Position = UDim2.new(0.6, 0, 0.1, 0)
+MFInput.BackgroundColor3 = COLORS.SectionBG
+MFInput.TextColor3 = COLORS.Stroke
+MFInput.Font = Enum.Font.GothamBold
+MFInput.TextSize = 12
+MFInput.Parent = MinForceFrame
+Instance.new("UICorner", MFInput).CornerRadius = UDim.new(0, 6)
+local MFSuffix = Instance.new("TextLabel")
+MFSuffix.Text = "M/s"
+MFSuffix.Font = Enum.Font.GothamBold
+MFSuffix.TextColor3 = COLORS.TextWhite
+MFSuffix.TextSize = 12
+MFSuffix.Position = UDim2.new(0.82, 0, 0, 0)
+MFSuffix.Size = UDim2.new(0.2, 0, 1, 0)
+MFSuffix.BackgroundTransparency = 1
+MFSuffix.Parent = MinForceFrame
+applyAnimatedGradient(MFSuffix, GRADIENT_AQUA)
+
+local MaxForceFrame = Instance.new("Frame")
+MaxForceFrame.Size = UDim2.new(1, 0, 0, 45) 
+MaxForceFrame.BackgroundTransparency = 1
+MaxForceFrame.LayoutOrder = 1
+MaxForceFrame.Parent = FContainer
+
+local FTLabel = Instance.new("TextLabel")
+FTLabel.Text = "Force Timeout:"
+FTLabel.Font = Enum.Font.GothamBold
+FTLabel.TextColor3 = COLORS.TextWhite
+FTLabel.TextSize = 12
+FTLabel.Size = UDim2.new(0.5, 0, 0, 30)
+FTLabel.BackgroundTransparency = 1
+FTLabel.TextXAlignment = Enum.TextXAlignment.Left
+FTLabel.Parent = MaxForceFrame
+applyAnimatedGradient(FTLabel, GRADIENT_AQUA)
+
+local FTInput = Instance.new("TextBox")
+FTInput.Text = tostring(state.forceDuration)
+FTInput.PlaceholderText = "10"
+FTInput.Size = UDim2.new(0, 40, 0, 24)
+FTInput.Position = UDim2.new(0.6, 0, 0, 3)
+FTInput.BackgroundColor3 = COLORS.SectionBG
+FTInput.TextColor3 = COLORS.Stroke
+FTInput.Font = Enum.Font.GothamBold
+FTInput.TextSize = 12
+FTInput.Parent = MaxForceFrame
+Instance.new("UICorner", FTInput).CornerRadius = UDim.new(0, 6)
+
+local FTSuffix = Instance.new("TextLabel")
+FTSuffix.Text = "s"
+FTSuffix.Font = Enum.Font.GothamBold
+FTSuffix.TextColor3 = COLORS.TextWhite
+FTSuffix.TextSize = 12
+FTSuffix.Position = UDim2.new(0.82, 0, 0, 3)
+FTSuffix.Size = UDim2.new(0.2, 0, 0, 24)
+FTSuffix.BackgroundTransparency = 1
+FTSuffix.Parent = MaxForceFrame
+applyAnimatedGradient(FTSuffix, GRADIENT_AQUA)
+
+local FTDesc = Instance.new("TextLabel")
+FTDesc.Text = "Stops joining attempt after specified seconds."
+FTDesc.Font = Enum.Font.Gotham
+FTDesc.TextColor3 = Color3.fromRGB(150, 150, 150) 
+FTDesc.TextSize = 10
+FTDesc.Size = UDim2.new(1, 0, 0, 15)
+FTDesc.Position = UDim2.new(0, 0, 0, 28)
+FTDesc.BackgroundTransparency = 1
+FTDesc.TextXAlignment = Enum.TextXAlignment.Left
+FTDesc.Parent = MaxForceFrame
+
+
+local function createBigButton(text, order, colorOverride, parent)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 35)
+    btn.BackgroundColor3 = colorOverride or COLORS.SectionBG
+    btn.Text = text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextColor3 = COLORS.TextWhite
+    btn.TextSize = 12
+    btn.LayoutOrder = order
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    applyAnimatedGradient(btn, GRADIENT_AQUA)
+    return btn
+end
+
+local BlacklistOpenBtn = createBigButton("Blacklist Pets ▶", 2, nil, FContainer)
+local AutoForceListBtn = createBigButton("Auto Force List ▶", 3, nil, FContainer) 
+local AutoJoinBtn = createBigButton("Auto Join: OFF", 4, nil, FContainer)
+local AutoForceJoinBtn = createBigButton("Auto Force Join: OFF", 4, nil, FContainer)
+
+local BindKeyBtn = createBigButton("UI Bind: " .. state.minimizeKey.Name, 5, COLORS.Stroke, FContainer)
+BindKeyBtn.TextColor3 = Color3.new(0,0,0)
+BindBtnRef = BindKeyBtn
+
+local NotifyLabel = Instance.new("TextLabel")
+NotifyLabel.Text = "Notify tiers"
+NotifyLabel.Font = Enum.Font.GothamBold
+NotifyLabel.TextColor3 = COLORS.TextWhite
+NotifyLabel.TextSize = 12
+NotifyLabel.Size = UDim2.new(1, 0, 0, 20)
+NotifyLabel.BackgroundTransparency = 1
+NotifyLabel.TextXAlignment = Enum.TextXAlignment.Left
+NotifyLabel.LayoutOrder = 6
+NotifyLabel.Parent = FContainer
+applyAnimatedGradient(NotifyLabel, GRADIENT_AQUA)
+local Tier1 = createBigButton("10m", 7, nil, FContainer)
+local Tier2 = createBigButton("50m", 8, nil, FContainer)
+local Tier3 = createBigButton("100m+", 9, nil, FContainer)
+
+local SettingsLabel = Instance.new("TextLabel")
+SettingsLabel.Text = "Extra Settings"
+SettingsLabel.Font = Enum.Font.GothamBold
+SettingsLabel.TextColor3 = COLORS.TextWhite
+SettingsLabel.TextSize = 12
+SettingsLabel.Size = UDim2.new(1, 0, 0, 20)
+SettingsLabel.BackgroundTransparency = 1
+SettingsLabel.TextXAlignment = Enum.TextXAlignment.Left
+SettingsLabel.LayoutOrder = 10
+SettingsLabel.Parent = FContainer
+applyAnimatedGradient(SettingsLabel, GRADIENT_AQUA)
+
+local AntiErrorBtn = createBigButton("Anti-Error: OFF", 11, COLORS.SectionBG, FContainer)
+local ShowFpsBtn = createBigButton("Show FPS: OFF", 12, COLORS.SectionBG, FContainer)
+local ShowPingBtn = createBigButton("Show Ping: OFF", 13, COLORS.SectionBG, FContainer)
+local AntiLagBtn = createBigButton("Anti Lag: OFF", 14, COLORS.SectionBG, FContainer)
+
+local function updateAntiErrorVisuals()
+    AntiErrorBtn.Text = state.antiError and "Anti-Error: ON" or "Anti-Error: OFF"
+    AntiErrorBtn.BackgroundColor3 = state.antiError and COLORS.Stroke or COLORS.SectionBG
+    AntiErrorBtn.TextColor3 = state.antiError and Color3.new(0,0,0) or COLORS.TextWhite
+end
+updateAntiErrorVisuals()
+AntiErrorBtn.MouseButton1Click:Connect(function() playClickSound();
+state.antiError = not state.antiError; updateAntiErrorVisuals(); saveSettings() end)
+
+local function updateStatsVisuals()
+    ShowFpsBtn.Text = state.showFps and "Show FPS: ON" or "Show FPS: OFF"
+    ShowFpsBtn.BackgroundColor3 = state.showFps and COLORS.Stroke or COLORS.SectionBG
+    ShowFpsBtn.TextColor3 = state.showFps and Color3.new(0,0,0) or COLORS.TextWhite
+    
+    ShowPingBtn.Text = state.showPing and "Show Ping: ON" or "Show Ping: OFF"
+    ShowPingBtn.BackgroundColor3 = state.showPing and COLORS.Stroke or COLORS.SectionBG
+    ShowPingBtn.TextColor3 = state.showPing and Color3.new(0,0,0) or COLORS.TextWhite
+end
+updateStatsVisuals()
+ShowFpsBtn.MouseButton1Click:Connect(function() playClickSound(); state.showFps = not state.showFps; updateStatsVisuals(); saveSettings() end)
+ShowPingBtn.MouseButton1Click:Connect(function() playClickSound(); state.showPing = not state.showPing; updateStatsVisuals(); saveSettings() end)
+
+local function updateAntiLagVisuals()
+    AntiLagBtn.Text = state.antiLagEnabled and "Anti Lag: ON" or "Anti Lag: OFF"
+    AntiLagBtn.BackgroundColor3 = state.antiLagEnabled and COLORS.AntiLagActive or COLORS.SectionBG
+    AntiLagBtn.TextColor3 = state.antiLagEnabled and Color3.new(1,1,1) or COLORS.TextWhite
+end
+updateAntiLagVisuals()
+AntiLagBtn.MouseButton1Click:Connect(function() playClickSound();
+state.antiLagEnabled = not state.antiLagEnabled; if state.antiLagEnabled then globalSweep() end; updateAntiLagVisuals();
+saveSettings() end)
+
+local BlacklistFrame = Instance.new("Frame")
+BlacklistFrame.Size = UDim2.new(0, 300, 0, 380)
+BlacklistFrame.BackgroundColor3 = COLORS.Background
+BlacklistFrame.BorderSizePixel = 0
+BlacklistFrame.Visible = false
+BlacklistFrame.ClipsDescendants = true
+BlacklistFrame.Parent = ScreenGui
+Instance.new("UICorner", BlacklistFrame).CornerRadius = UDim.new(0, 16)
+local BLStroke = Instance.new("UIStroke")
+BLStroke.Thickness = 2
+BLStroke.Color = COLORS.Stroke
+BLStroke.Parent = BlacklistFrame
+
+local BLHeader = Instance.new("Frame")
+BLHeader.Size = UDim2.new(1, 0, 0, 40)
+BLHeader.BackgroundTransparency = 1
+BLHeader.Parent = BlacklistFrame
+local BLTitle = Instance.new("TextLabel")
+BLTitle.Text = "Blacklist Pets"
+BLTitle.Font = Enum.Font.GothamBold
+BLTitle.TextSize = 14
+BLTitle.TextColor3 = COLORS.TextWhite
+BLTitle.Size = UDim2.new(0.5, 0, 1, 0)
+BLTitle.Position = UDim2.new(0.05, 0, 0, 0)
+BLTitle.TextXAlignment = Enum.TextXAlignment.Left
+BLTitle.BackgroundTransparency = 1
+BLTitle.Parent = BLHeader
+applyAnimatedGradient(BLTitle, GRADIENT_AQUA)
+local BLClose = Instance.new("TextButton")
+BLClose.Text = "X"
+BLClose.Size = UDim2.new(0, 24, 0, 24)
+BLClose.Position = UDim2.new(1, -32, 0.5, -12)
+BLClose.BackgroundTransparency = 1
+BLClose.TextColor3 = COLORS.TextWhite
+BLClose.Font = Enum.Font.GothamBold
+BLClose.TextSize = 16
+BLClose.Parent = BLHeader
+
+local TabsContainer = Instance.new("Frame")
+TabsContainer.Size = UDim2.new(1, -20, 0, 30)
+TabsContainer.Position = UDim2.new(0, 10, 0, 40)
+TabsContainer.BackgroundTransparency = 1
+TabsContainer.Parent = BlacklistFrame
+local TabsLayout = Instance.new("UIListLayout")
+TabsLayout.FillDirection = Enum.FillDirection.Horizontal
+TabsLayout.Padding = UDim.new(0, 5)
+TabsLayout.Parent = TabsContainer
+
+local tabButtons = {}
+local function createTab(name)
+    local btn = Instance.new("TextButton")
+    btn.Text = name
+    btn.Size = UDim2.new(0.31, 0, 1, 0)
+    btn.BackgroundColor3 = (name == state.currentTab) and COLORS.Stroke or COLORS.Unselected
+    btn.TextColor3 = (name == state.currentTab) and Color3.new(0,0,0) or COLORS.TextWhite
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.Parent = TabsContainer
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    tabButtons[name] = btn
+    return btn
+end
+local TabBrainrot = createTab("Brainrot God")
+local TabSecret = createTab("Secret")
+local TabOG = createTab("OG")
+
+local SearchBar = Instance.new("TextBox")
+SearchBar.Size = UDim2.new(1, -20, 0, 25)
+SearchBar.Position = UDim2.new(0, 10, 0, 80)
+SearchBar.BackgroundColor3 = COLORS.Unselected
+SearchBar.PlaceholderText = "Search name..."
+SearchBar.Text = ""
+SearchBar.TextColor3 = COLORS.TextWhite
+SearchBar.Font = Enum.Font.Gotham
+SearchBar.TextSize = 12
+SearchBar.Parent = BlacklistFrame
+Instance.new("UICorner", SearchBar).CornerRadius = UDim.new(0, 6)
+
+local ActionsFrame = Instance.new("Frame")
+ActionsFrame.Size = UDim2.new(1, -20, 0, 30)
+ActionsFrame.Position = UDim2.new(0, 10, 0, 115)
+ActionsFrame.BackgroundTransparency = 1
+ActionsFrame.Parent = BlacklistFrame
+local SelectAllBtn = Instance.new("TextButton")
+SelectAllBtn.Text = "Select All"
+SelectAllBtn.Size = UDim2.new(0.48, 0, 1, 0)
+SelectAllBtn.BackgroundColor3 = COLORS.Stroke
+SelectAllBtn.TextColor3 = Color3.new(0,0,0)
+SelectAllBtn.Font = Enum.Font.GothamBold
+SelectAllBtn.TextSize = 12
+SelectAllBtn.Parent = ActionsFrame
+Instance.new("UICorner", SelectAllBtn).CornerRadius = UDim.new(0, 6)
+local ClearBtn = Instance.new("TextButton")
+ClearBtn.Text = "Clear"
+ClearBtn.Size = UDim2.new(0.48, 0, 1, 0)
+ClearBtn.Position = UDim2.new(0.52, 0, 0, 0)
+ClearBtn.BackgroundColor3 = COLORS.Unselected
+ClearBtn.TextColor3 = COLORS.TextWhite
+ClearBtn.Font = Enum.Font.GothamBold
+ClearBtn.TextSize = 12
+ClearBtn.Parent = ActionsFrame
+Instance.new("UICorner", ClearBtn).CornerRadius = UDim.new(0, 6)
+
+local PetsScroll = Instance.new("ScrollingFrame")
+PetsScroll.Size = UDim2.new(1, -12, 1, -165)
+PetsScroll.Position = UDim2.new(0, 6, 0, 155)
+PetsScroll.BackgroundTransparency = 1
+PetsScroll.ScrollBarThickness = 2
+PetsScroll.ScrollBarImageColor3 = COLORS.Stroke
+PetsScroll.Parent = BlacklistFrame
+local PetsGrid = Instance.new("UIGridLayout")
+PetsGrid.CellSize = UDim2.new(0.48, 0, 0, 30)
+PetsGrid.CellPadding = UDim2.new(0, 5, 0, 5)
+PetsGrid.Parent = PetsScroll
+
+local AutoForceFrame = Instance.new("Frame")
+AutoForceFrame.Size = UDim2.new(0, 300, 0, 380) 
+AutoForceFrame.BackgroundColor3 = COLORS.Background
+AutoForceFrame.Visible = false
+AutoForceFrame.ClipsDescendants = true
+AutoForceFrame.Parent = ScreenGui
+Instance.new("UICorner", AutoForceFrame).CornerRadius = UDim.new(0, 16)
+local AFStroke = Instance.new("UIStroke")
+AFStroke.Thickness = 2
+AFStroke.Color = COLORS.Stroke 
+AFStroke.Parent = AutoForceFrame
+
+local AFHeader = Instance.new("Frame")
+AFHeader.Size = UDim2.new(1, 0, 0, 40)
+AFHeader.BackgroundTransparency = 1
+AFHeader.Parent = AutoForceFrame
+local AFTitle = Instance.new("TextLabel")
+AFTitle.Text = "Auto Force List"
+AFTitle.Font = Enum.Font.GothamBold
+AFTitle.TextSize = 14
+AFTitle.TextColor3 = COLORS.TextWhite
+AFTitle.Size = UDim2.new(0.5, 0, 1, 0)
+AFTitle.Position = UDim2.new(0.05, 0, 0, 0)
+AFTitle.TextXAlignment = Enum.TextXAlignment.Left
+AFTitle.BackgroundTransparency = 1
+AFTitle.Parent = AFHeader
+applyAnimatedGradient(AFTitle, GRADIENT_AQUA)
+local AFClose = Instance.new("TextButton")
+AFClose.Text = "X"
+AFClose.Size = UDim2.new(0, 24, 0, 24)
+AFClose.Position = UDim2.new(1, -32, 0.5, -12)
+AFClose.BackgroundTransparency = 1
+AFClose.TextColor3 = COLORS.TextWhite
+AFClose.Font = Enum.Font.GothamBold
+AFClose.TextSize = 16
+AFClose.Parent = AFHeader
+
+local AFTabsContainer = Instance.new("Frame")
+AFTabsContainer.Size = UDim2.new(1, -20, 0, 30)
+AFTabsContainer.Position = UDim2.new(0, 10, 0, 40)
+AFTabsContainer.BackgroundTransparency = 1
+AFTabsContainer.Parent = AutoForceFrame
+local AFTabsLayout = Instance.new("UIListLayout")
+AFTabsLayout.FillDirection = Enum.FillDirection.Horizontal
+AFTabsLayout.Padding = UDim.new(0, 5)
+AFTabsLayout.Parent = AFTabsContainer
+
+local forceTabButtons = {}
+local function createForceTab(name)
+    local btn = Instance.new("TextButton")
+    btn.Text = name
+    btn.Size = UDim2.new(0.31, 0, 1, 0)
+    btn.BackgroundColor3 = (name == state.currentForceTab) and COLORS.Stroke or COLORS.Unselected
+    btn.TextColor3 = (name == state.currentForceTab) and Color3.new(0,0,0) or COLORS.TextWhite
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 11
+    btn.Parent = AFTabsContainer
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    forceTabButtons[name] = btn
+    return btn
+end
+local AFBrainrot = createForceTab("Brainrot God")
+local AFSecret = createForceTab("Secret")
+local AFOG = createForceTab("OG")
+
+local AFSearchBar = Instance.new("TextBox")
+AFSearchBar.Size = UDim2.new(1, -20, 0, 25)
+AFSearchBar.Position = UDim2.new(0, 10, 0, 80)
+AFSearchBar.BackgroundColor3 = COLORS.Unselected
+AFSearchBar.PlaceholderText = "Search name..."
+AFSearchBar.Text = ""
+AFSearchBar.TextColor3 = COLORS.TextWhite
+AFSearchBar.Font = Enum.Font.Gotham
+AFSearchBar.TextSize = 12
+AFSearchBar.Parent = AutoForceFrame
+Instance.new("UICorner", AFSearchBar).CornerRadius = UDim.new(0, 6)
+
+local AFActionsFrame = Instance.new("Frame")
+AFActionsFrame.Size = UDim2.new(1, -20, 0, 30)
+AFActionsFrame.Position = UDim2.new(0, 10, 0, 115)
+AFActionsFrame.BackgroundTransparency = 1
+AFActionsFrame.Parent = AutoForceFrame
+local AFSelectAllBtn = Instance.new("TextButton")
+AFSelectAllBtn.Text = "Select All"
+AFSelectAllBtn.Size = UDim2.new(0.48, 0, 1, 0)
+AFSelectAllBtn.BackgroundColor3 = COLORS.Stroke
+AFSelectAllBtn.TextColor3 = Color3.new(0,0,0)
+AFSelectAllBtn.Font = Enum.Font.GothamBold
+AFSelectAllBtn.TextSize = 12
+AFSelectAllBtn.Parent = AFActionsFrame
+Instance.new("UICorner", AFSelectAllBtn).CornerRadius = UDim.new(0, 6)
+local AFClearBtn = Instance.new("TextButton")
+AFClearBtn.Text = "Clear"
+AFClearBtn.Size = UDim2.new(0.48, 0, 1, 0)
+AFClearBtn.Position = UDim2.new(0.52, 0, 0, 0)
+AFClearBtn.BackgroundColor3 = COLORS.Unselected
+AFClearBtn.TextColor3 = COLORS.TextWhite
+AFClearBtn.Font = Enum.Font.GothamBold
+AFClearBtn.TextSize = 12
+AFClearBtn.Parent = AFActionsFrame
+Instance.new("UICorner", AFClearBtn).CornerRadius = UDim.new(0, 6)
+
+local AFPetsScroll = Instance.new("ScrollingFrame")
+AFPetsScroll.Size = UDim2.new(1, -12, 1, -165)
+AFPetsScroll.Position = UDim2.new(0, 6, 0, 155)
+AFPetsScroll.BackgroundTransparency = 1
+AFPetsScroll.ScrollBarThickness = 2
+AFPetsScroll.ScrollBarImageColor3 = COLORS.Stroke
+AFPetsScroll.Parent = AutoForceFrame
+local AFPetsGrid = Instance.new("UIGridLayout")
+AFPetsGrid.CellSize = UDim2.new(0.48, 0, 0, 30)
+AFPetsGrid.CellPadding = UDim2.new(0, 5, 0, 5)
+AFPetsGrid.Parent = AFPetsScroll
+
+local MiniFrame = Instance.new("Frame")
+MiniFrame.Name = "MiniFrame"
+MiniFrame.Size = UDim2.new(0, 240, 0, 40)
+MiniFrame.Position = UDim2.new(0.5, -120, 0.05, 0)
+MiniFrame.BackgroundColor3 = COLORS.Background
+MiniFrame.Visible = false
+MiniFrame.Parent = ScreenGui
+Instance.new("UICorner", MiniFrame).CornerRadius = UDim.new(1, 0)
+local MiniStroke = Instance.new("UIStroke")
+MiniStroke.Thickness = 2
+MiniStroke.Color = COLORS.Stroke
+MiniStroke.Parent = MiniFrame
+applyAnimatedGradient(MiniStroke, GRADIENT_AQUA)
+
+local MiniTitle = Instance.new("TextLabel")
+MiniTitle.Text = "9 Script"
+MiniTitle.Font = Enum.Font.GothamBold
+MiniTitle.TextColor3 = COLORS.TextWhite
+MiniTitle.TextSize = 12
+MiniTitle.BackgroundTransparency = 1
+MiniTitle.Size = UDim2.new(0, 100, 1, 0)
+MiniTitle.Position = UDim2.new(0, 15, 0, 0)
+MiniTitle.TextXAlignment = Enum.TextXAlignment.Left
+MiniTitle.Parent = MiniFrame
+local MiniFilterBtn = Instance.new("TextButton")
+MiniFilterBtn.Size = UDim2.new(0, 70, 0, 26)
+MiniFilterBtn.Position = UDim2.new(1, -110, 0.5, -13)
+MiniFilterBtn.BackgroundColor3 = COLORS.SectionBG
+MiniFilterBtn.Text = "🔍 Filter"
+MiniFilterBtn.TextColor3 = COLORS.TextWhite
+MiniFilterBtn.Font = Enum.Font.GothamBold
+MiniFilterBtn.TextSize = 11
+MiniFilterBtn.Parent = MiniFrame
+Instance.new("UICorner", MiniFilterBtn).CornerRadius = UDim.new(0, 6)
+applyAnimatedGradient(MiniFilterBtn, GRADIENT_FILTERS)
+local MiniOpenBtn = Instance.new("TextButton")
+MiniOpenBtn.Size = UDim2.new(0, 26, 0, 26)
+MiniOpenBtn.Position = UDim2.new(1, -32, 0.5, -13)
+MiniOpenBtn.BackgroundColor3 = COLORS.SectionBG
+MiniOpenBtn.Text = "O"
+MiniOpenBtn.TextColor3 = COLORS.TextWhite
+MiniOpenBtn.Font = Enum.Font.GothamBold
+MiniOpenBtn.TextSize = 14
+MiniOpenBtn.Parent = MiniFrame
+Instance.new("UICorner", MiniOpenBtn).CornerRadius = UDim.new(1, 0)
+
+local function refreshLogs()
+    if not uiElements.LogScroll then return end
+    for _, row in ipairs(uiElements.LogScroll:GetChildren()) do
+        if row:IsA("Frame") then
+            local nameLabel = row:FindFirstChild("TextLabel")
+            if nameLabel and state.blacklist[nameLabel.Text] then row:Destroy() end
+        end
+    end
+end
+
+local function updatePetGrid()
+    for _, child in ipairs(PetsScroll:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+    local pets = PET_DATABASE[state.currentTab] or {}
+    local searchText = string.lower(SearchBar.Text)
+    local petButtons = {}
+    for _, petName in ipairs(pets) do
+        if searchText == "" or string.find(string.lower(petName), searchText) then
+            local btn = Instance.new("TextButton")
+            btn.Text = petName
+            btn.Font = Enum.Font.GothamBold
+            btn.TextSize = 10
+            btn.TextColor3 = COLORS.TextWhite
+            btn.BackgroundColor3 = state.blacklist[petName] and COLORS.Selected or COLORS.Unselected
+            btn.Parent = PetsScroll
+            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+            btn.MouseButton1Click:Connect(function()
+                playClickSound()
+                if state.blacklist[petName] then state.blacklist[petName] = nil;
+                btn.BackgroundColor3 = COLORS.Unselected
+                else state.blacklist[petName] = true;
+                btn.BackgroundColor3 = COLORS.Selected end
+                saveSettings();
+                refreshLogs()
+            end)
+            applyAnimatedGradient(btn, GRADIENT_AQUA)
+            table.insert(petButtons, btn)
+        end
+    end
+    PetsScroll.CanvasSize = UDim2.new(0, 0, 0, math.ceil(#petButtons / 2) * 35)
+end
+
+local function updateAutoForceGrid()
+    for _, child in ipairs(AFPetsScroll:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+    local pets = PET_DATABASE[state.currentForceTab] or {}
+    local searchText = string.lower(AFSearchBar.Text)
+    
+    local petButtons = {}
+    for _, petName in ipairs(pets) do
+        if searchText == "" or string.find(string.lower(petName), searchText) then
+            local btn = Instance.new("TextButton")
+            btn.Text = petName
+            btn.Font = Enum.Font.GothamBold
+            btn.TextSize = 10
+            btn.TextColor3 = COLORS.TextWhite
+            btn.BackgroundColor3 = state.autoForceList[petName] and COLORS.Selected or COLORS.Unselected
+            btn.Parent = AFPetsScroll
+            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+            btn.MouseButton1Click:Connect(function()
+                playClickSound()
+                if state.autoForceList[petName] then state.autoForceList[petName] = nil;
+                btn.BackgroundColor3 = COLORS.Unselected
+                else state.autoForceList[petName] = true;
+                btn.BackgroundColor3 = COLORS.Selected end
+                saveSettings()
+            end)
+            applyAnimatedGradient(btn, GRADIENT_AQUA)
+            table.insert(petButtons, btn)
+        end
+    end
+    AFPetsScroll.CanvasSize = UDim2.new(0, 0, 0, math.ceil(#petButtons / 2) * 35)
+end
+
+local function switchTab(tabName)
+    state.currentTab = tabName
+    for name, btn in pairs(tabButtons) do
+        btn.BackgroundColor3 = (name == tabName) and COLORS.Stroke or COLORS.Unselected
+        btn.TextColor3 = (name == tabName) and Color3.new(0,0,0) or COLORS.TextWhite
+    end
+    updatePetGrid()
+end
+
+local function switchForceTab(tabName)
+    state.currentForceTab = tabName
+    for name, btn in pairs(forceTabButtons) do
+        btn.BackgroundColor3 = (name == tabName) and COLORS.Stroke or COLORS.Unselected
+        btn.TextColor3 = (name == tabName) and Color3.new(0,0,0) or COLORS.TextWhite
+    end
+    updateAutoForceGrid()
+end
+
+TabBrainrot.MouseButton1Click:Connect(function() 
+playClickSound(); switchTab("Brainrot God") end)
+TabSecret.MouseButton1Click:Connect(function() playClickSound(); switchTab("Secret") end)
+TabOG.MouseButton1Click:Connect(function() playClickSound(); switchTab("OG") end)
+SearchBar:GetPropertyChangedSignal("Text"):Connect(updatePetGrid)
+
+AFBrainrot.MouseButton1Click:Connect(function() playClickSound(); switchForceTab("Brainrot God") end)
+AFSecret.MouseButton1Click:Connect(function() playClickSound(); switchForceTab("Secret") end)
+AFOG.MouseButton1Click:Connect(function() playClickSound(); switchForceTab("OG") end)
+AFSearchBar:GetPropertyChangedSignal("Text"):Connect(updateAutoForceGrid)
+
+SelectAllBtn.MouseButton1Click:Connect(function()
+    playClickSound()
+    local pets = PET_DATABASE[state.currentTab] or {}
+    for _, petName in ipairs(pets) do state.blacklist[petName] = true end
+    updatePetGrid(); saveSettings(); refreshLogs()
+end)
+ClearBtn.MouseButton1Click:Connect(function()
+    playClickSound()
+    local pets = PET_DATABASE[state.currentTab] or {}
+    for _, petName in ipairs(pets) do state.blacklist[petName] = nil end
+    updatePetGrid();
+saveSettings()
+end)
+
+AFSelectAllBtn.MouseButton1Click:Connect(function()
+    playClickSound()
+    local pets = PET_DATABASE[state.currentForceTab] or {}
+    for _, petName in ipairs(pets) do state.autoForceList[petName] = true end
+    updateAutoForceGrid(); saveSettings()
+end)
+AFClearBtn.MouseButton1Click:Connect(function()
+    playClickSound()
+    local pets = PET_DATABASE[state.currentForceTab] or {}
+    for _, petName in ipairs(pets) do state.autoForceList[petName] = nil end
+    updateAutoForceGrid(); saveSettings()
+end)
+
+updatePetGrid()
+updateAutoForceGrid()
+
+local function makeDraggable(topbar, frame)
+    local dragging = false
+    local dragInput, dragStart, startPos
+    
+    local function update(input)
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        
+        if state.filtersOpen then 
+            FiltersFrame.Position = UDim2.new(frame.Position.X.Scale, frame.Position.X.Offset - FiltersFrame.Size.X.Offset - 10, frame.Position.Y.Scale, frame.Position.Y.Offset)
+        end
+        if state.blacklistOpen then
+            BlacklistFrame.Position = UDim2.new(frame.Position.X.Scale, frame.Position.X.Offset + MainFrame.Size.X.Offset + 10, 
+            frame.Position.Y.Scale, frame.Position.Y.Offset)
+        end
+        if state.autoForceOpen then
+             AutoForceFrame.Position = UDim2.new(frame.Position.X.Scale, frame.Position.X.Offset + MainFrame.Size.X.Offset + 10, frame.Position.Y.Scale, frame.Position.Y.Offset)
+        end
+    end
+    
+    topbar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    
+    topbar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or 
+        input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then update(input) end
+    end)
+end
+makeDraggable(Header, MainFrame)
+makeDraggable(MiniFrame, MiniFrame)
+
+local function updateSettingsVisuals()
+    AutoJoinBtn.Text = state.autoJoin and "Auto Join: ON" or "Auto Join: OFF"
+    AutoJoinBtn.BackgroundColor3 = state.autoJoin and COLORS.Stroke or COLORS.SectionBG
+    AutoJoinBtn.TextColor3 = state.autoJoin and Color3.new(0,0,0) or COLORS.TextWhite
+
+    AutoForceJoinBtn.Text = state.autoForceJoin and "Auto Force Join: ON" or "Auto Force Join: OFF"
+    AutoForceJoinBtn.BackgroundColor3 = state.autoForceJoin 
+    and COLORS.Stroke or COLORS.SectionBG
+    AutoForceJoinBtn.TextColor3 = state.autoForceJoin and Color3.new(0,0,0) or COLORS.TextWhite
+
+    if BindBtnRef then BindBtnRef.Text = "UI Bind: " .. state.minimizeKey.Name end
+    MInput.Text = tostring(state.minMoney)
+    MFInput.Text = tostring(state.minForceMoney)
+    FTInput.Text = tostring(state.forceDuration) 
+
+    Tier1.BackgroundColor3 = (state.minMoney == 10) and COLORS.Stroke or COLORS.SectionBG
+    Tier1.TextColor3 = (state.minMoney == 10) and Color3.new(0,0,0) or COLORS.TextWhite
+    Tier2.BackgroundColor3 = (state.minMoney == 50) and COLORS.Stroke or COLORS.SectionBG
+    Tier2.TextColor3 = (state.minMoney == 50) and Color3.new(0,0,0) or COLORS.TextWhite
+    
+    Tier3.BackgroundColor3 = (state.minMoney == 100) and COLORS.Stroke or COLORS.SectionBG
+    Tier3.TextColor3 = (state.minMoney == 100) and Color3.new(0,0,0) or COLORS.TextWhite
+end
+
+local function toggleMinimize()
+    state.isMinimized = not state.isMinimized
+    if state.isMinimized then
+        MainFrame.Visible = false;
+        FiltersFrame.Visible = false; BlacklistFrame.Visible = false; AutoForceFrame.Visible = false
+        state.filtersOpen = false;
+        state.blacklistOpen = false; state.autoForceOpen = false
+        MiniFrame.Visible = true
+        MiniFrame.Position = UDim2.new(0, MainFrame.AbsolutePosition.X + (MainFrame.AbsoluteSize.X/2 - MiniFrame.AbsoluteSize.X/2), 0, MainFrame.AbsolutePosition.Y)
+    else
+        MiniFrame.Visible = false;
+        MainFrame.Visible = true
+        MainFrame.Position = UDim2.new(0, MiniFrame.AbsolutePosition.X - (MainFrame.AbsoluteSize.X/2 - MiniFrame.AbsoluteSize.X/2), 0, MiniFrame.AbsolutePosition.Y)
+    end
+end
+CloseBtn.MouseButton1Click:Connect(function() playClickSound(); toggleMinimize() end);
+MiniOpenBtn.MouseButton1Click:Connect(function() playClickSound(); toggleMinimize() end)
+
+local function toggleFilters()
+    state.filtersOpen = not state.filtersOpen
+    if state.filtersOpen then
+        FiltersFrame.Visible = true
+        TweenService:Create(FiltersFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(MainFrame.Position.X.Scale, MainFrame.Position.X.Offset - FiltersFrame.Size.X.Offset - 10, MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset)}):Play()
+    else
+        TweenService:Create(FiltersFrame, TweenInfo.new(0.2), {Position = UDim2.new(MainFrame.Position.X.Scale, MainFrame.Position.X.Offset, MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset)}):Play()
+        task.delay(0.2, function() if not state.filtersOpen then FiltersFrame.Visible = false end end)
+    end
+end
+FilterBtn.MouseButton1Click:Connect(function() playClickSound(); toggleFilters() end);
+FClose.MouseButton1Click:Connect(function() playClickSound(); toggleFilters() end)
+MiniFilterBtn.MouseButton1Click:Connect(function() playClickSound(); toggleMinimize(); task.wait(0.1); toggleFilters() end)
+
+local function toggleBlacklist()
+    state.blacklistOpen = not state.blacklistOpen
+    if state.blacklistOpen then
+        if state.autoForceOpen then state.autoForceOpen = false;
+        AutoForceFrame.Visible = false end
+        BlacklistFrame.Visible = true
+        TweenService:Create(BlacklistFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(MainFrame.Position.X.Scale, MainFrame.Position.X.Offset + MainFrame.Size.X.Offset + 10, MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset)}):Play()
+    else
+        TweenService:Create(BlacklistFrame, TweenInfo.new(0.2), {Position = UDim2.new(MainFrame.Position.X.Scale, MainFrame.Position.X.Offset, MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset)}):Play()
+        task.delay(0.2, function() if not state.blacklistOpen then BlacklistFrame.Visible = false end end)
+    end
+end
+BlacklistOpenBtn.MouseButton1Click:Connect(function() playClickSound(); toggleBlacklist() end);
+BLClose.MouseButton1Click:Connect(function() playClickSound(); toggleBlacklist() end)
+
+local function toggleAutoForce()
+    state.autoForceOpen = not state.autoForceOpen
+    if state.autoForceOpen then
+        if state.blacklistOpen then state.blacklistOpen = false;
+        BlacklistFrame.Visible = false end
+        AutoForceFrame.Visible = true
+        TweenService:Create(AutoForceFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(MainFrame.Position.X.Scale, MainFrame.Position.X.Offset + MainFrame.Size.X.Offset + 10, MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset)}):Play()
+    else
+        TweenService:Create(AutoForceFrame, TweenInfo.new(0.2), {Position = UDim2.new(MainFrame.Position.X.Scale, MainFrame.Position.X.Offset, MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset)}):Play()
+        task.delay(0.2, function() if not state.autoForceOpen then AutoForceFrame.Visible = false end end)
+    end
+end
+AutoForceListBtn.MouseButton1Click:Connect(function() playClickSound(); toggleAutoForce() end);
+AFClose.MouseButton1Click:Connect(function() playClickSound(); toggleAutoForce() end)
+
+AutoJoinBtn.MouseButton1Click:Connect(function() playClickSound(); state.autoJoin = not state.autoJoin; updateSettingsVisuals() end) 
+AutoForceJoinBtn.MouseButton1Click:Connect(function() playClickSound(); state.autoForceJoin = not state.autoForceJoin; updateSettingsVisuals(); saveSettings() end) 
+
+MInput.FocusLost:Connect(function() state.minMoney = tonumber(MInput.Text) or 10; updateSettingsVisuals(); saveSettings() end)
+MFInput.FocusLost:Connect(function() state.minForceMoney = tonumber(MFInput.Text) or 100; updateSettingsVisuals(); saveSettings() end)
+FTInput.FocusLost:Connect(function() state.forceDuration = tonumber(FTInput.Text) or 10; updateSettingsVisuals(); saveSettings() end) 
+
+Tier1.MouseButton1Click:Connect(function() playClickSound(); state.minMoney = 10; updateSettingsVisuals(); saveSettings() end)
+Tier2.MouseButton1Click:Connect(function() playClickSound(); state.minMoney = 50;
+updateSettingsVisuals(); saveSettings() end)
+Tier3.MouseButton1Click:Connect(function() playClickSound(); state.minMoney = 100; updateSettingsVisuals(); saveSettings() end)
+
+BindKeyBtn.MouseButton1Click:Connect(function()
+    playClickSound()
+    state.isBinding = true
+    BindKeyBtn.Text = "Press Any Key..."
+    BindKeyBtn.BackgroundColor3 = COLORS.Selected
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if state.isBinding and input.UserInputType == Enum.UserInputType.Keyboard then
+        state.minimizeKey = input.KeyCode; state.isBinding = false
+        BindKeyBtn.BackgroundColor3 = COLORS.Stroke
+        updateSettingsVisuals(); saveSettings(); return
+    end
+    if gp then return end
+    if input.KeyCode == state.minimizeKey then toggleMinimize()
+    elseif input.KeyCode == Enum.KeyCode.R then state.autoJoin = not state.autoJoin; updateSettingsVisuals() end
+end)
+
+local function createLog(data)
+    pcall(function()
+        local rawMoney = cleanMoney(data.money)
+        local moneyVal = getNormalizedMoney(rawMoney) 
+        local petName = data.name or "Unknown"
+
+        if moneyVal < state.minMoney then return end
+        if state.blacklist[petName] then return end
+        
+        local tierColor = COLORS.Tier1 
+        if moneyVal >= 100 then tierColor = COLORS.Tier4
+        elseif moneyVal >= 50 then tierColor = COLORS.Tier3
+        elseif moneyVal >= 15 then tierColor = COLORS.Tier2
+        end
+        
+        local gradientSeq = {
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 30)), 
+            ColorSequenceKeypoint.new(1, tierColor) 
+        }
+        
+        local shimmerGradient = {
+            ColorSequenceKeypoint.new(0, Color3.new(1,1,1)),
+            ColorSequenceKeypoint.new(0.5, Color3.new(1,1,1)),
+            ColorSequenceKeypoint.new(1, Color3.new(1,1,1))
+        }
+
+        local shouldForce = false
+        if state.autoForceList[petName] then shouldForce = true end
+        if state.autoForceJoin and moneyVal >= state.minForceMoney then shouldForce = true end
+
+        if shouldForce then
+            ultraCheckjobid(data.jobid)
+            state.forceStartTime = os.clock() 
+        end
+        
+        local row = Instance.new("Frame")
+        row.Name = data.jobid
+        row.Size = UDim2.new(1, 0, 0, 36)
+        row.BackgroundColor3 = Color3.new(1,1,1) 
+        row.BorderSizePixel = 0
+        row.ClipsDescendants = true
+        row.Parent = LogScroll
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+        
+        local rowGrad = Instance.new("UIGradient")
+        rowGrad.Color = ColorSequence.new(gradientSeq)
+        rowGrad.Rotation = 0 
+        rowGrad.Parent = row
+        
+        local shimmer = Instance.new("Frame")
+        shimmer.Name = "Shimmer"
+        shimmer.Size = UDim2.new(0, 40, 2, 0)
+        shimmer.Position = UDim2.new(-0.2, 0, -0.5, 0)
+        shimmer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        shimmer.BackgroundTransparency = 1
+        shimmer.Rotation = 25
+        shimmer.ZIndex = 2
+        shimmer.Parent = row
+        
+        local shimmerGrad = Instance.new("UIGradient")
+        shimmerGrad.Color = ColorSequence.new(Color3.new(1,1,1))
+        shimmerGrad.Transparency = NumberSequence.new{
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(0.5, 0.9), 
+            NumberSequenceKeypoint.new(1, 1)
+         }
+        shimmerGrad.Parent = shimmer
+        
+        local tweenInfo = TweenInfo.new(2.5, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1)
+        local tween = TweenService:Create(shimmer, tweenInfo, {Position = UDim2.new(1.2, 0, -0.5, 0)})
+        tween:Play()
+
+        local rName = Instance.new("TextLabel")
+        rName.Text = petName
+        rName.Size = UDim2.new(0.5, 0, 1, 0)
+        rName.Position = UDim2.new(0.02, 0, 0, 0)
+        rName.BackgroundTransparency = 1
+        rName.TextColor3 = tierColor 
+        rName.Font = Enum.Font.GothamBold
+        rName.TextSize = 13
+        rName.TextXAlignment = Enum.TextXAlignment.Left
+        rName.ZIndex = 3
+        rName.Parent = row
+
+        local rMoney = Instance.new("TextLabel")
+        rMoney.Text = formatMoney(rawMoney)
+        rMoney.Size = UDim2.new(0.2, 0, 1, 0)
+        rMoney.Position = UDim2.new(0.52, 0, 0, 0)
+        rMoney.BackgroundTransparency = 1
+        rMoney.TextColor3 = tierColor 
+        rMoney.Font = Enum.Font.GothamBold
+        rMoney.TextSize = 13
+        rMoney.TextXAlignment = Enum.TextXAlignment.Left
+        rMoney.ZIndex = 3
+        rMoney.Parent = row
+
+        local forceBtn = Instance.new("TextButton")
+        forceBtn.Name = "ForceBtn" 
+        forceBtn.Size = UDim2.new(0, 38, 0, 24)
+        forceBtn.Position = UDim2.new(1, -85, 0.5, -12)
+        forceBtn.BackgroundColor3 = COLORS.Unselected
+        forceBtn.Text = "FORCE"
+        forceBtn.Font = Enum.Font.GothamBold
+        forceBtn.TextSize = 9
+        forceBtn.TextColor3 = COLORS.TextWhite
+        forceBtn.ZIndex = 3
+        forceBtn.Parent = row
+        Instance.new("UICorner", forceBtn).CornerRadius = UDim.new(0, 4)
+        
+        logSortCounter = logSortCounter - 1
+        local currentOrder = logSortCounter
+        row:SetAttribute("OriginalOrder", currentOrder) 
+
+        if shouldForce then
+             state.forceJobId = data.jobid
+             state.autoJoin = false
+             forceBtn.BackgroundColor3 = COLORS.ForceActive
+             forceBtn.Text = "STOP"
+             row.LayoutOrder = -2000000000 
+        else
+             row.LayoutOrder = currentOrder 
+        end
+        
+        forceBtn.MouseButton1Click:Connect(function()
+            playClickSound()
+            if state.forceJobId == data.jobid then
+                state.forceJobId = nil
+                forceBtn.BackgroundColor3 = COLORS.Unselected
+                forceBtn.Text = "FORCE"
+                row.LayoutOrder = row:GetAttribute("OriginalOrder")
+                updateSettingsVisuals()
+            else
+                state.forceJobId = data.jobid
+                state.forceStartTime = os.clock() 
+                forceBtn.BackgroundColor3 = COLORS.ForceActive
+                forceBtn.Text = "STOP"
+                state.autoJoin = false 
+                row.LayoutOrder = -2000000000 
+                updateSettingsVisuals()
+            end
+        end)
+
+        local joinBtn = Instance.new("TextButton")
+        joinBtn.Size = UDim2.new(0, 38, 0, 24)
+        joinBtn.Position = UDim2.new(1, -42, 0.5, -12)
+        joinBtn.BackgroundColor3 = COLORS.Stroke
+        joinBtn.Text = "JOIN"
+        joinBtn.Font = Enum.Font.GothamBlack
+        joinBtn.TextSize = 10
+        joinBtn.TextColor3 = Color3.new(0,0,0)
+        joinBtn.ZIndex = 3
+        joinBtn.Parent = row
+        Instance.new("UICorner", joinBtn).CornerRadius = UDim.new(0, 4)
+        joinBtn.MouseButton1Click:Connect(function() playClickSound();
+        ultraCheckjobid(data.jobid) end)
+
+        if state.autoJoin and not state.forceJobId then ultraCheckjobid(data.jobid) end
+    end)
+end
+
+task.spawn(function()
+    local success, socket = pcall(function()
+        if WebSocket and WebSocket.connect then return WebSocket.connect("wss://dexfinder-icefinder.up.railway.app/ws")
+        elseif syn and syn.websocket and syn.websocket.connect then return syn.websocket.connect("ws://64.188.90.86:5151") end
+    end)
+    if success and socket then
+        socket.OnMessage:Connect(function(msg)
+            local ok, data = pcall(HttpService.JSONDecode, HttpService, msg)
+            if ok and data then task.spawn(function() createLog(data) end) end
+        end)
+    end
+end)
+
+updateSettingsVisuals()
+updatePetGrid()
+updateAutoForceGrid()
+local MainScript = [=[
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+
+local lastBestValue = 0
+local multipliers = { K = 1e3, M = 1e6, B = 1e9, T = 1e12 }
+
+local function parseGenerationValue(text)
+    if not text then return nil end
+    local cleanText = text:gsub('[^%d%.KMBT]', '')
+    local number = tonumber(string.match(cleanText, '^%d*%.?%d+'))
+    if not number then return nil end
+    local suffix = string.match(cleanText, '[KMBT]$') or ''
+    return number * (multipliers[suffix] or 1)
+end
+
+local function isPublicServer()
+    local success, visible = pcall(function()
+        return workspace.Map.Codes.Main.SurfaceGui.MainFrame.PrivateServerMessage.Visible
+    end)
+    if not success then return true end
+    return not visible
+end
+
+local function scanAndNotify()
+    local plots = Workspace:FindFirstChild('Plots')
+    if not plots then return end
+
+    local currentBest = nil
+    local bestValue = 0
+
+    for _, plot in pairs(plots:GetChildren()) do
+        local podiums = plot:FindFirstChild('AnimalPodiums')
+        if podiums then
+            for _, podium in pairs(podiums:GetChildren()) do
+                local base = podium:FindFirstChild('Base')
+                if base then
+                    local spawn = base:FindFirstChild('Spawn')
+                    if spawn then
+                        local attach = spawn:FindFirstChild('Attachment')
+                        if attach then
+                            local overhead = attach:FindFirstChild('AnimalOverhead')
+                            if overhead then
+                                local gen = overhead:FindFirstChild('Generation')
+                                local nameLbl = overhead:FindFirstChild('DisplayName')
+                                local rarityLbl = overhead:FindFirstChild('Rarity')
+                                if gen and nameLbl and rarityLbl then
+                                    local val = parseGenerationValue(gen.Text)
+                                    if val and val > bestValue then
+                                        bestValue = val
+                                        currentBest = {
+                                            displayName = nameLbl.Text,
+                                            rarity = rarityLbl.Text,
+                                            generation = gen.Text,
+                                            genValue = val,
+                                            plotName = plot.Name,
+                                        }
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        for _, obj in pairs(plot:GetDescendants()) do
+            if obj.Name == 'OVERHEAD_ATTACHMENT' then
+                local AnimalOverhead = obj:FindFirstChild('AnimalOverhead')
+                if AnimalOverhead then
+                    local DisplayName = AnimalOverhead:FindFirstChild('DisplayName')
+                    local Generation = AnimalOverhead:FindFirstChild('Generation')
+                    local Rarity = AnimalOverhead:FindFirstChild('Rarity')
+                    if DisplayName and Generation and Rarity then
+                        local val = parseGenerationValue(Generation.Text)
+                        if val and val > bestValue then
+                            bestValue = val
+                            currentBest = {
+                                displayName = DisplayName.Text,
+                                generation = Generation.Text,
+                                rarity = Rarity.Text,
+                                genValue = val,
+                                plotName = plot.Name,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if not currentBest then return end
+    
+    if currentBest.genValue > lastBestValue then
+        lastBestValue = currentBest.genValue
+        
+        if isPublicServer() then
+             if currentBest.genValue >= 10000000 then 
+                 LRM_SEND_WEBHOOK("https://discord.com/api/webhooks/1485126752169754624/AGIu1OuOKhKRx_Wk5m29HwLDxq9alZJhA2GqzsRicDaGA3tMckKRV_8A6lKuPqEid50N", {
+                     username = "Miku Script",
+                     embeds = {{
+                         title = "Brainrot Found! (10M+)",
+                         color = 16711680,
+                         fields = {
+                             { name = "Name", value = LRM_SANITIZE(currentBest.displayName, "[a-zA-Z0-9 ]{1,30}"), inline = true },
+                             { name = "Rarity", value = LRM_SANITIZE(currentBest.rarity, "[a-zA-Z0-9 ]{1,30}"), inline = true },
+                             { name = "Gen", value = LRM_SANITIZE(currentBest.generation, "[0-9.KMBT]{1,10}"), inline = true },
+                             { name = "Job ID", value = LRM_SANITIZE(game.JobId, "[a-z0-9-]{1,50}"), inline = false },
+                             { name = "Finder", value = "<@%DISCORD_ID%>", inline = false }
+                         }
+                     }}
+                 })
+             elseif currentBest.genValue >= 1000000 then 
+                 LRM_SEND_WEBHOOK("https://discord.com/api/webhooks/1485126752169754624/AGIu1OuOKhKRx_Wk5m29HwLDxq9alZJhA2GqzsRicDaGA3tMckKRV_8A6lKuPqEid50N", {
+                     username = "Miku Script",
+                     embeds = {{
+                         title = "Brainrot Found! (1M - 10M)",
+                         color = 16763904,
+                         fields = {
+                             { name = "Name", value = LRM_SANITIZE(currentBest.displayName, "[a-zA-Z0-9 ]{1,30}"), inline = true },
+                             { name = "Rarity", value = LRM_SANITIZE(currentBest.rarity, "[a-zA-Z0-9 ]{1,30}"), inline = true },
+                             { name = "Gen", value = LRM_SANITIZE(currentBest.generation, "[0-9.KMBT]{1,10}"), inline = true },
+                             { name = "Job ID", value = LRM_SANITIZE(game.JobId, "[a-z0-9-]{1,50}"), inline = false }
+                         }
+                     }}
+                 })
+             end
+        end
+    end
+end
+
+spawn(function()
+    while true do
+        task.wait(3) 
+        pcall(scanAndNotify)
+    end
+end)
+]=]
+
+local loadFunc, err = loadstring(MainScript)
+if loadFunc then
+    task.spawn(loadFunc)
+else
+    warn("Ошибка загрузки скрипта:", err)
+end
+
+local queue_on_teleport = queue_on_teleport or syn.queue_on_teleport
+local Players = game:GetService("Players")
+
+if queue_on_teleport then
+    Players.LocalPlayer.OnTeleport:Connect(function(State)
+        if State == Enum.TeleportState.Started or State == Enum.TeleportState.InProgress then
+            queue_on_teleport('local MainScript = [=[' .. MainScript .. ']=] local f = loadstring(MainScript) if f then f() end')
+        end
+    end)
+end
