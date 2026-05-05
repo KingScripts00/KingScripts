@@ -1,0 +1,121 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local lp = Players.LocalPlayer
+
+local desyncActive = false
+local invisiblePart = nil
+local linearVelocity = nil
+local heartbeatConn = nil
+local characterAddedConn = nil
+
+local function getRaknet()
+    local g = getgenv and getgenv() or _G
+    return rawget(g, "raknet") or rawget(g, "network")
+end
+
+local function setRaknetDesync(state)
+    local raknet = getRaknet()
+    if raknet and type(raknet.desync) == "function" then
+        raknet.desync(state)
+    elseif raknet and type(raknet.setdesync) == "function" then
+        raknet.setdesync(state)
+    end
+end
+
+local function updateMovement()
+    if not desyncActive or not invisiblePart or not invisiblePart.Parent then return end
+    local char = lp.Character
+    if not char or invisiblePart.Parent ~= char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not hrp then return end
+    if humanoid.Health <= 0 then
+        if linearVelocity and linearVelocity.Parent then
+            linearVelocity.VectorVelocity = Vector3.new(0, invisiblePart.AssemblyLinearVelocity.Y, 0)
+        else
+            invisiblePart.AssemblyLinearVelocity = Vector3.new(0, invisiblePart.AssemblyLinearVelocity.Y, 0)
+        end
+        return
+    end
+    local moveDir = humanoid.MoveDirection
+    if moveDir.Magnitude > 0 then
+        local targetVel = Vector3.new(moveDir.X * humanoid.WalkSpeed, invisiblePart.AssemblyLinearVelocity.Y, moveDir.Z * humanoid.WalkSpeed)
+        if linearVelocity and linearVelocity.Parent then
+            linearVelocity.VectorVelocity = targetVel
+        else
+            invisiblePart.AssemblyLinearVelocity = targetVel
+        end
+    else
+        if linearVelocity and linearVelocity.Parent then
+            linearVelocity.VectorVelocity = Vector3.new(0, invisiblePart.AssemblyLinearVelocity.Y, 0)
+        else
+            invisiblePart.AssemblyLinearVelocity = Vector3.new(0, invisiblePart.AssemblyLinearVelocity.Y, 0)
+        end
+    end
+    if hrp and invisiblePart then
+        invisiblePart.CFrame = hrp.CFrame * CFrame.new(0, 0, -2.85)
+    end
+end
+
+local function setupDesyncCharacter(char)
+    if not desyncActive then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not hrp then return end
+    if invisiblePart then invisiblePart:Destroy() end
+    invisiblePart = Instance.new("Part")
+    invisiblePart.Name = "DesyncFollower"
+    invisiblePart.Size = Vector3.new(2, 1, 2)
+    invisiblePart.Transparency = 1
+    invisiblePart.CanCollide = false
+    invisiblePart.Anchored = false
+    invisiblePart.Massless = true
+    invisiblePart.Parent = char
+    local att = Instance.new("Attachment", invisiblePart)
+    linearVelocity = Instance.new("LinearVelocity")
+    linearVelocity.Name = "DesyncLinearVelocity"
+    linearVelocity.Attachment0 = att
+    linearVelocity.RelativeTo = Enum.ActivationRelativeTo.World
+    linearVelocity.MaxForce = 1.2e7
+    linearVelocity.VectorVelocity = Vector3.zero
+    linearVelocity.Parent = invisiblePart
+    local weld = Instance.new("Weld")
+    weld.Part0 = hrp
+    weld.Part1 = invisiblePart
+    weld.C0 = CFrame.new(0, 0, -2.85)
+    weld.Parent = invisiblePart
+    invisiblePart.CFrame = hrp.CFrame * CFrame.new(0, 0, -2.85)
+    if heartbeatConn then heartbeatConn:Disconnect() end
+    heartbeatConn = RunService.Heartbeat:Connect(updateMovement)
+end
+
+local function startDesync()
+    if desyncActive then return end
+    desyncActive = true
+    setRaknetDesync(true)
+    if lp.Character then
+        setupDesyncCharacter(lp.Character)
+    end
+    if characterAddedConn then characterAddedConn:Disconnect() end
+    characterAddedConn = lp.CharacterAdded:Connect(function(char)
+        if desyncActive then
+            task.wait(0.5)
+            setupDesyncCharacter(char)
+        end
+    end)
+end
+
+local function stopDesync()
+    if not desyncActive then return end
+    desyncActive = false
+    setRaknetDesync(false)
+    if heartbeatConn then heartbeatConn:Disconnect() end
+    if characterAddedConn then characterAddedConn:Disconnect() end
+    if invisiblePart then invisiblePart:Destroy() end
+    linearVelocity = nil
+    invisiblePart = nil
+end
+
+startDesync()
