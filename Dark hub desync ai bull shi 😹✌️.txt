@@ -1,0 +1,1127 @@
+-- Consolidated from script-b.lua: desync (FFlags + raknet hooks + follower / LinearVelocity loop + session API)
+-- plus Speed Customizer + Desync panels (ScreenGui "DarkHub_DesyncBundle_UI").
+-- Optional hooks: DesyncBundle.hooks.saveAutoConfig, .stopAutoPlayNow, .initializeServerPosEsp (setUiActive is wired by the Desync panel).
+-- Optional: DesyncBundle.stealState.isStealing, .autoPlayRunning for parity with the main hub.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+	task.wait()
+	LocalPlayer = Players.LocalPlayer
+end
+
+local IS_TOUCH_DEVICE = UserInputService.TouchEnabled
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local function ui(pcValue, mobileValue)
+	return IS_MOBILE and mobileValue or pcValue
+end
+
+local Theme = {
+	MainBG = Color3.fromRGB(15, 15, 20),
+	SidebarBG = Color3.fromRGB(10, 10, 15),
+	Accent = Color3.fromRGB(255, 255, 255),
+	TextMain = Color3.fromRGB(255, 255, 255),
+	TextDark = Color3.fromRGB(160, 160, 165),
+	StatGreen = Color3.fromRGB(100, 255, 100),
+	StatBlue = Color3.fromRGB(100, 200, 255),
+	Border = Color3.fromRGB(45, 45, 50),
+	SilverGradient = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(160, 160, 165)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
+	}),
+	RedGradient = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 50, 50)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(150, 0, 0)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 50, 50)),
+	}),
+	BGGradient = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 35)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 20)),
+	}),
+	Font = Enum.Font.GothamBold,
+}
+
+local DEFAULT_UI_POSITIONS = {
+	SpeedMain = { xs = 0.5, xo = 80, ys = 0.4, yo = 0 },
+	DesyncMain = { xs = 0.5, xo = ui(200, 120), ys = ui(0.26, 0.20), yo = 0 },
+}
+local uiPosState = {}
+local function copyUiPosDefaults()
+	for k, v in pairs(DEFAULT_UI_POSITIONS) do
+		uiPosState[k] = { xs = v.xs, xo = v.xo, ys = v.ys, yo = v.yo }
+	end
+end
+local function posToUDim2(v)
+	if type(v) ~= "table" then
+		return nil
+	end
+	if type(v.xs) ~= "number" or type(v.xo) ~= "number" or type(v.ys) ~= "number" or type(v.yo) ~= "number" then
+		return nil
+	end
+	return UDim2.new(v.xs, v.xo, v.ys, v.yo)
+end
+copyUiPosDefaults()
+
+local function isCarryingOrGrab(char)
+	if not char then
+		return false
+	end
+	for _, n in ipairs({ "Carrying", "IsCarrying", "Grabbed", "Holding", "StealHold", "HasGrab" }) do
+		local v = char:FindFirstChild(n, true)
+		if v and v:IsA("BoolValue") and v.Value then
+			return true
+		end
+	end
+	for _, child in ipairs(char:GetChildren()) do
+		if child:IsA("Model") then
+			local hum = child:FindFirstChildOfClass("Humanoid")
+			local hrp = child:FindFirstChild("HumanoidRootPart")
+			if hum and hrp then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local DesyncBundle = {
+	stealState = { isStealing = false },
+	autoPlayRunning = false,
+	hooks = {
+		saveAutoConfig = function() end,
+		stopAutoPlayNow = nil,
+		setUiActive = nil,
+		initializeServerPosEsp = nil,
+	},
+	-- Mirror hub speed UI: when Speed + Enabled, desync uses custom speeds for report/drive.
+	-- Speed = true so the inner ENABLE switch works without the full Dark Hub menu.
+	Flags = { Speed = true, UiLock = false },
+	SpeedSettings = { Enabled = false, Speed = 60, Steal = 30 },
+}
+
+local function getActiveSpeed(char)
+	if DesyncBundle.stealState.isStealing then
+		return DesyncBundle.SpeedSettings.Steal
+	end
+	if LocalPlayer:GetAttribute("Stealing") then
+		return DesyncBundle.SpeedSettings.Steal
+	end
+	if char and char:GetAttribute("Stealing") then
+		return DesyncBundle.SpeedSettings.Steal
+	end
+	if isCarryingOrGrab(char) then
+		return DesyncBundle.SpeedSettings.Steal
+	end
+	return DesyncBundle.SpeedSettings.Speed
+end
+
+local desyncActive = false
+local DESYNC_REPORT_WALK_MIN = 40
+local DESYNC_REPORT_WALK_MAX = 59
+local DESYNC_DRIVE_MIN = 20
+local DESYNC_DRIVE_MAX = 29
+local DESYNC_REPORT_WALK_MIN_TOUCH = 38
+local DESYNC_REPORT_WALK_MAX_TOUCH = 56
+local DESYNC_REPORT_PER_DRIVE_PC = 1.58
+local DESYNC_REPORT_PER_DRIVE_OFF_PC = 1.5
+local DESYNC_REPORT_PER_DRIVE_TOUCH = 1.48
+local DESYNC_REPORT_PER_DRIVE_OFF_TOUCH = 3.2
+local DESYNC_BYPASS_STEAL_MIN_MOBILE = 40
+local DESYNC_BYPASS_STEAL_MAX_MOBILE = 51
+local DESYNC_VEL_SMOOTH_HZ = 4.25
+local DESYNC_SNAP_MIN_INTERVAL = 0.14
+local DESYNC_LV_MAX_FORCE = 1.2e7
+local desyncSpeedBoxes = { walk = nil, steal = nil }
+local desyncSavedSpeed = nil
+local desyncConn = nil
+local desyncInvisiblePart = nil
+local desyncOriginalWalk = nil
+local desyncLastWalkWritten = nil
+local desyncLastSnapTime = 0
+local desyncPostSimLastT = 0
+local desyncLinearVelocity = nil
+local desyncNetworkRefreshConn = nil
+
+local DesyncTuning = {
+	lvMaxForce = DESYNC_LV_MAX_FORCE,
+}
+local DesyncPhys = setmetatable({}, {
+	__index = function(_, k)
+		if k == "speedBoxes" then return desyncSpeedBoxes end
+		if k == "savedSpeed" then return desyncSavedSpeed end
+		if k == "conn" then return desyncConn end
+		if k == "invisiblePart" then return desyncInvisiblePart end
+		if k == "originalWalk" then return desyncOriginalWalk end
+		if k == "lastWalkWritten" then return desyncLastWalkWritten end
+		if k == "lastSnapTime" then return desyncLastSnapTime end
+		if k == "postSimLastT" then return desyncPostSimLastT end
+		if k == "linearVelocity" then return desyncLinearVelocity end
+		if k == "networkRefreshConn" then return desyncNetworkRefreshConn end
+	end,
+	__newindex = function(_, k, v)
+		if k == "speedBoxes" then desyncSpeedBoxes = v
+		elseif k == "savedSpeed" then desyncSavedSpeed = v
+		elseif k == "conn" then desyncConn = v
+		elseif k == "invisiblePart" then desyncInvisiblePart = v
+		elseif k == "originalWalk" then desyncOriginalWalk = v
+		elseif k == "lastWalkWritten" then desyncLastWalkWritten = v
+		elseif k == "lastSnapTime" then desyncLastSnapTime = v
+		elseif k == "postSimLastT" then desyncPostSimLastT = v
+		elseif k == "linearVelocity" then desyncLinearVelocity = v
+		elseif k == "networkRefreshConn" then desyncNetworkRefreshConn = v
+		end
+	end,
+})
+
+local DESYNC_HUB_FFLAGS = {
+	S2PhysicsSenderRate = 15000,
+	DFIntConnectionMTUSize = 1400,
+	DFIntRakNetResendBufferArrayLength = 128,
+	DFIntRakNetResendTimeoutMS = 300,
+	DFIntNetworkLatencyTolerance = 1,
+	DFIntNetworkPrediction = 1,
+	FFlagRakNetDisableFlowControl = true,
+	DFFlagRakNetDisableCongestionControl = true,
+	DFIntTaskSchedulerTargetFps = 29383,
+	FFlagGameBasicSettingsFramerateCap5 = false,
+	FFlagTaskSchedulerLimitTargetFpsTo2402 = false,
+}
+
+local function applyDesyncHubFFlags()
+	local now = tick()
+	local last = tonumber(DesyncBundle.fflagLastApplyT) or 0
+	if (now - last) < 0.75 then
+		return
+	end
+	DesyncBundle.fflagLastApplyT = now
+	if type(setfflag) ~= "function" then
+		return
+	end
+	for name, value in pairs(DESYNC_HUB_FFLAGS) do
+		pcall(function()
+			setfflag(tostring(name), tostring(value))
+		end)
+	end
+end
+
+local function reapplyDesyncHubFFlagsIfActive()
+	if not desyncActive then
+		return
+	end
+	applyDesyncHubFFlags()
+end
+
+local function respawnPlayerForDesync(plr)
+	pcall(function()
+		plr:LoadCharacter()
+	end)
+end
+
+local function isStealMoveState(char)
+	if DesyncBundle.stealState.isStealing then
+		return true
+	end
+	if LocalPlayer:GetAttribute("Stealing") then
+		return true
+	end
+	if char and char:GetAttribute("Stealing") then
+		return true
+	end
+	if isCarryingOrGrab(char) then
+		return true
+	end
+	return false
+end
+
+local function getDesyncSplitWalkAndDrive(char)
+	local orig = desyncOriginalWalk
+	if orig == nil and char then
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		orig = hum and hum.WalkSpeed or 16
+	end
+	orig = math.clamp(orig or 16, 6, 34)
+	local span = 28
+	local t = (orig - 6) / span
+	t = math.clamp(t, 0, 1)
+	local driveS = DESYNC_DRIVE_MIN + t * (DESYNC_DRIVE_MAX - DESYNC_DRIVE_MIN)
+	local reportW
+	if IS_TOUCH_DEVICE then
+		reportW = driveS * DESYNC_REPORT_PER_DRIVE_TOUCH + DESYNC_REPORT_PER_DRIVE_OFF_TOUCH
+		reportW = math.clamp(reportW, DESYNC_REPORT_WALK_MIN_TOUCH, DESYNC_REPORT_WALK_MAX_TOUCH)
+	else
+		reportW = driveS * DESYNC_REPORT_PER_DRIVE_PC + DESYNC_REPORT_PER_DRIVE_OFF_PC
+		reportW = math.clamp(reportW, DESYNC_REPORT_WALK_MIN, DESYNC_REPORT_WALK_MAX)
+	end
+	return reportW, driveS
+end
+
+local function getDesyncReportWalk(char)
+	if DesyncBundle.Flags.Speed and DesyncBundle.SpeedSettings.Enabled then
+		return math.clamp(getActiveSpeed(char), 1, 120)
+	end
+	if isStealMoveState(char) then
+		local base = getActiveSpeed(char)
+		if IS_TOUCH_DEVICE then
+			return math.clamp(base, DESYNC_BYPASS_STEAL_MIN_MOBILE, DESYNC_BYPASS_STEAL_MAX_MOBILE)
+		end
+		return math.clamp(base, 1, 120)
+	end
+	local rw, _ = getDesyncSplitWalkAndDrive(char)
+	return rw
+end
+
+local function getDesyncDriveSpeed(char)
+	if DesyncBundle.Flags.Speed and DesyncBundle.SpeedSettings.Enabled then
+		return math.clamp(getActiveSpeed(char), 1, 120)
+	end
+	if isStealMoveState(char) then
+		local base = getActiveSpeed(char)
+		if IS_TOUCH_DEVICE then
+			if DesyncBundle.Flags.Speed and DesyncBundle.SpeedSettings.Enabled then
+				return math.clamp(base, 1, 120)
+			end
+			return math.clamp(base, DESYNC_BYPASS_STEAL_MIN_MOBILE, DESYNC_BYPASS_STEAL_MAX_MOBILE)
+		end
+		return math.clamp(base, 1, 120)
+	end
+	local _, ds = getDesyncSplitWalkAndDrive(char)
+	return ds
+end
+
+local function getDesyncCappedSpeed(char)
+	return getDesyncDriveSpeed(char)
+end
+
+local function getMovementSpeedForPhysics(char)
+	if desyncActive then
+		return getDesyncCappedSpeed(char)
+	end
+	return getActiveSpeed(char)
+end
+
+local snapDesyncFollowerIfActive
+local function setRaknetDesync(on)
+	pcall(function()
+		local g = (getgenv and getgenv()) or _G
+		local r = rawget(g, "raknet")
+		if r == nil and type(_G) == "table" then
+			r = rawget(_G, "raknet")
+		end
+		if type(r) == "table" and type(r.desync) == "function" then
+			r.desync(on)
+		end
+	end)
+	pcall(function()
+		local g = (getgenv and getgenv()) or _G
+		local n = rawget(g, "network")
+		if type(n) == "table" and type(n.desync) == "function" then
+			n.desync(on)
+		end
+	end)
+	pcall(function()
+		local g = (getgenv and getgenv()) or _G
+		local f = rawget(g, "fluxus")
+		if type(f) == "table" and type(f.network_desync) == "function" then
+			f.network_desync(on)
+		end
+	end)
+end
+
+local function teardownDesyncPhys()
+	if desyncConn then
+		desyncConn:Disconnect()
+		desyncConn = nil
+	end
+	pcall(function()
+		if desyncInvisiblePart then
+			desyncInvisiblePart:Destroy()
+		end
+	end)
+	desyncInvisiblePart = nil
+	for _, inst in ipairs(workspace:GetChildren()) do
+		if inst.Name == "DarkHub_DesyncPos" then
+			pcall(function()
+				inst:Destroy()
+			end)
+		end
+	end
+	local ch = LocalPlayer.Character
+	local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+	if hum and desyncOriginalWalk ~= nil then
+		pcall(function()
+			hum.WalkSpeed = desyncOriginalWalk
+		end)
+	end
+	desyncOriginalWalk = nil
+	desyncLastWalkWritten = nil
+	desyncLastSnapTime = 0
+	desyncPostSimLastT = 0
+	desyncLinearVelocity = nil
+end
+
+local function updateDesyncMovement(dt)
+	dt = (type(dt) == "number" and dt > 0 and dt < 0.5) and dt or (1 / 60)
+	local blend = math.clamp(dt * DESYNC_VEL_SMOOTH_HZ, 0.08, 0.5)
+	local function applySmoothedHorizontal(targetVx, targetVz)
+		local cur = DesyncPhys.invisiblePart.AssemblyLinearVelocity
+		local vy = cur.Y
+		local nvx = cur.X + (targetVx - cur.X) * blend
+		local nvz = cur.Z + (targetVz - cur.Z) * blend
+		local v = Vector3.new(nvx, vy, nvz)
+		if DesyncPhys.linearVelocity and DesyncPhys.linearVelocity.Parent then
+			DesyncPhys.linearVelocity.VectorVelocity = v
+		else
+			DesyncPhys.invisiblePart.AssemblyLinearVelocity = v
+		end
+	end
+	if not desyncActive or not DesyncPhys.invisiblePart or not DesyncPhys.invisiblePart.Parent then
+		return
+	end
+	local char = LocalPlayer.Character
+	if not char or DesyncPhys.invisiblePart.Parent ~= char then
+		return
+	end
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not hrp then
+		return
+	end
+	if humanoid.Health <= 0 then
+		pcall(function()
+			if DesyncPhys.originalWalk ~= nil then
+				humanoid.WalkSpeed = DesyncPhys.originalWalk
+			end
+		end)
+		DesyncPhys.lastWalkWritten = nil
+		local vy0 = DesyncPhys.invisiblePart.AssemblyLinearVelocity.Y
+		local zv = Vector3.new(0, vy0, 0)
+		if DesyncPhys.linearVelocity and DesyncPhys.linearVelocity.Parent then
+			DesyncPhys.linearVelocity.VectorVelocity = zv
+		else
+			DesyncPhys.invisiblePart.AssemblyLinearVelocity = zv
+		end
+		return
+	end
+
+	if DesyncBundle.autoPlayRunning then
+		local vy = DesyncPhys.invisiblePart.AssemblyLinearVelocity.Y
+		local v = hrp.AssemblyLinearVelocity
+		local nv = Vector3.new(v.X, vy, v.Z)
+		if DesyncPhys.linearVelocity and DesyncPhys.linearVelocity.Parent then
+			DesyncPhys.linearVelocity.VectorVelocity = nv
+		else
+			DesyncPhys.invisiblePart.AssemblyLinearVelocity = nv
+		end
+		return
+	end
+
+	local moveDir = humanoid.MoveDirection
+	local driveUnit
+	local moving
+	if moveDir.Magnitude > 0.02 then
+		driveUnit = moveDir.Unit
+		moving = true
+	else
+		moving = false
+	end
+
+	local speedCustomizerOn = DesyncBundle.Flags.Speed and DesyncBundle.SpeedSettings.Enabled
+
+	if speedCustomizerOn then
+		if not DesyncBundle.autoPlayRunning then
+			pcall(function()
+				if DesyncPhys.originalWalk ~= nil then
+					humanoid.WalkSpeed = DesyncPhys.originalWalk
+				end
+			end)
+		end
+		local targetSpeed = getDesyncCappedSpeed(char)
+		if moving then
+			applySmoothedHorizontal(driveUnit.X * targetSpeed, driveUnit.Z * targetSpeed)
+		else
+			applySmoothedHorizontal(0, 0)
+		end
+	else
+		local reportW, driveS = getDesyncSplitWalkAndDrive(char)
+		if moving then
+			if not DesyncBundle.autoPlayRunning then
+				if DesyncPhys.lastWalkWritten == nil or math.abs(DesyncPhys.lastWalkWritten - reportW) > 0.28 then
+					pcall(function()
+						humanoid.WalkSpeed = reportW
+					end)
+					DesyncPhys.lastWalkWritten = reportW
+				end
+			end
+			applySmoothedHorizontal(driveUnit.X * driveS, driveUnit.Z * driveS)
+		else
+			if not DesyncBundle.autoPlayRunning then
+				if DesyncPhys.lastWalkWritten == nil or math.abs(DesyncPhys.lastWalkWritten - reportW) > 0.35 then
+					pcall(function()
+						humanoid.WalkSpeed = reportW
+					end)
+					DesyncPhys.lastWalkWritten = reportW
+				end
+			end
+			applySmoothedHorizontal(0, 0)
+		end
+	end
+end
+
+snapDesyncFollowerIfActive = function()
+	if not desyncActive or not desyncInvisiblePart or not desyncInvisiblePart.Parent then
+		return
+	end
+	local c = LocalPlayer.Character
+	if not c or desyncInvisiblePart.Parent ~= c then
+		return
+	end
+	local h = c:FindFirstChild("HumanoidRootPart")
+	if not h then
+		return
+	end
+	local now = tick()
+	if desyncLastSnapTime > 0 and (now - desyncLastSnapTime) < DESYNC_SNAP_MIN_INTERVAL then
+		return
+	end
+	desyncLastSnapTime = now
+	desyncInvisiblePart.CFrame = h.CFrame * CFrame.new(0, 0, -2.85)
+end
+
+local function setupDesyncCharacter(char)
+	teardownDesyncPhys()
+	if not desyncActive then
+		return
+	end
+	local humanoid = char:WaitForChild("Humanoid", 15)
+	local hrp = char:WaitForChild("HumanoidRootPart", 15)
+	if not humanoid or not hrp then
+		return
+	end
+
+	DesyncPhys.originalWalk = humanoid.WalkSpeed
+	DesyncPhys.lastWalkWritten = nil
+	DesyncPhys.linearVelocity = nil
+
+	DesyncPhys.invisiblePart = Instance.new("Part")
+	DesyncPhys.invisiblePart.Name = "DarkHub_DesyncFollower"
+	DesyncPhys.invisiblePart.Size = Vector3.new(2, 1, 2)
+	DesyncPhys.invisiblePart.Transparency = 1
+	DesyncPhys.invisiblePart.CanCollide = false
+	DesyncPhys.invisiblePart.Anchored = false
+	DesyncPhys.invisiblePart.Massless = true
+	DesyncPhys.invisiblePart.Parent = char
+
+	local dhAtt = Instance.new("Attachment")
+	dhAtt.Name = "DH_DesyncDrive"
+	dhAtt.Parent = DesyncPhys.invisiblePart
+	local lv = Instance.new("LinearVelocity")
+	lv.Name = "DH_DesyncLinearVelocity"
+	lv.Attachment0 = dhAtt
+	lv.RelativeTo = Enum.ActivationRelativeTo.World
+	lv.MaxForce = DesyncTuning.lvMaxForce
+	lv.VectorVelocity = Vector3.zero
+	lv.Parent = DesyncPhys.invisiblePart
+	DesyncPhys.linearVelocity = lv
+
+	local welded = false
+	pcall(function()
+		local w = Instance.new("Weld")
+		w.Name = "DH_DesyncWeld"
+		w.Part0 = hrp
+		w.Part1 = DesyncPhys.invisiblePart
+		w.C0 = CFrame.new(0, 0, -3.85)
+		w.Parent = DesyncPhys.invisiblePart
+		welded = true
+	end)
+	if not welded then
+		DesyncPhys.invisiblePart.CFrame = hrp.CFrame * CFrame.new(0, 0, -3.85)
+		local wc = Instance.new("WeldConstraint")
+		wc.Name = "DH_DesyncWeldConstraint"
+		wc.Part0 = hrp
+		wc.Part1 = DesyncPhys.invisiblePart
+		wc.Parent = DesyncPhys.invisiblePart
+	end
+
+	task.defer(function()
+		DesyncPhys.lastSnapTime = 0
+		snapDesyncFollowerIfActive()
+		local ps = RunService.PostSimulation
+		if ps then
+			ps:Wait()
+		else
+			RunService.Heartbeat:Wait()
+		end
+		snapDesyncFollowerIfActive()
+	end)
+	task.delay(0.15, snapDesyncFollowerIfActive)
+
+	DesyncPhys.postSimLastT = os.clock()
+	local stepper = RunService.PostSimulation or RunService.Heartbeat
+	DesyncPhys.conn = stepper:Connect(function()
+		local now = os.clock()
+		local dt = math.clamp(now - DesyncPhys.postSimLastT, 1 / 240, 1 / 25)
+		DesyncPhys.postSimLastT = now
+		updateDesyncMovement(dt)
+	end)
+
+	local refreshAccum = 0
+	if DesyncPhys.networkRefreshConn then
+		DesyncPhys.networkRefreshConn:Disconnect()
+	end
+	DesyncPhys.networkRefreshConn = RunService.Heartbeat:Connect(function(dt)
+		if not desyncActive then
+			return
+		end
+		refreshAccum += typeof(dt) == "number" and dt or (1 / 60)
+		if refreshAccum < 1.2 then
+			return
+		end
+		refreshAccum = 0
+		reapplyDesyncHubFFlagsIfActive()
+	end)
+
+	DesyncBundle.fflagLastApplyT = 0
+	applyDesyncHubFFlags()
+	task.defer(function()
+		if desyncActive and LocalPlayer.Character == char then
+			DesyncBundle.fflagLastApplyT = 0
+			applyDesyncHubFFlags()
+		end
+	end)
+	task.delay(0.45, function()
+		if desyncActive and LocalPlayer.Character == char then
+			DesyncBundle.fflagLastApplyT = 0
+			applyDesyncHubFFlags()
+		end
+	end)
+	task.delay(0.55, function()
+		if desyncActive and LocalPlayer.Character == char then
+			reapplyDesyncHubFFlagsIfActive()
+		end
+	end)
+	task.delay(1.35, function()
+		if desyncActive and LocalPlayer.Character == char then
+			reapplyDesyncHubFFlagsIfActive()
+		end
+	end)
+
+	task.spawn(function()
+		task.wait(0.2)
+		if not desyncActive or LocalPlayer.Character ~= char then
+			return
+		end
+		local esp = DesyncBundle.hooks.initializeServerPosEsp
+		if type(esp) == "function" then
+			esp()
+		end
+	end)
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+	if desyncActive then
+		DesyncBundle.fflagLastApplyT = 0
+		applyDesyncHubFFlags()
+		task.delay(0.45, function()
+			if desyncActive and LocalPlayer.Character == char then
+				DesyncBundle.fflagLastApplyT = 0
+				applyDesyncHubFFlags()
+			end
+		end)
+		task.delay(1.15, function()
+			if desyncActive and LocalPlayer.Character == char then
+				DesyncBundle.fflagLastApplyT = 0
+				applyDesyncHubFFlags()
+			end
+		end)
+		task.defer(function()
+			setupDesyncCharacter(char)
+			if desyncActive and (not DesyncPhys.invisiblePart or not DesyncPhys.invisiblePart.Parent) then
+				task.delay(0.35, function()
+					if desyncActive and LocalPlayer.Character == char then
+						setupDesyncCharacter(LocalPlayer.Character)
+					end
+				end)
+			end
+		end)
+	end
+end)
+UserInputService.WindowFocused:Connect(function()
+	if desyncActive then
+		DesyncBundle.fflagLastApplyT = 0
+		task.delay(0.2, reapplyDesyncHubFFlagsIfActive)
+	end
+end)
+UserInputService.WindowFocusReleased:Connect(function()
+	if desyncActive then
+		DesyncBundle.fflagLastApplyT = 0
+		task.delay(0.2, reapplyDesyncHubFFlagsIfActive)
+	end
+end)
+
+function DesyncBundle.stopDesyncSession()
+	setRaknetDesync(false)
+	desyncActive = false
+	teardownDesyncPhys()
+	DesyncPhys.savedSpeed = nil
+	local ui = DesyncBundle.hooks.setUiActive
+	if type(ui) == "function" then
+		ui(false)
+	end
+	DesyncBundle.hooks.saveAutoConfig()
+end
+
+function DesyncBundle.startDesyncSession()
+	if desyncActive then
+		return
+	end
+	local stopAp = DesyncBundle.hooks.stopAutoPlayNow
+	if type(stopAp) == "function" then
+		stopAp(false)
+	end
+	teardownDesyncPhys()
+	DesyncPhys.savedSpeed = nil
+	DesyncBundle.fflagLastApplyT = 0
+	applyDesyncHubFFlags()
+	task.delay(0.45, function()
+		if desyncActive then
+			DesyncBundle.fflagLastApplyT = 0
+			applyDesyncHubFFlags()
+		end
+	end)
+	task.delay(1.15, function()
+		if desyncActive then
+			DesyncBundle.fflagLastApplyT = 0
+			applyDesyncHubFFlags()
+		end
+	end)
+	task.delay(2.2, function()
+		if desyncActive then
+			DesyncBundle.fflagLastApplyT = 0
+			applyDesyncHubFFlags()
+		end
+	end)
+	setRaknetDesync(true)
+	desyncActive = true
+	local ui = DesyncBundle.hooks.setUiActive
+	if type(ui) == "function" then
+		ui(true)
+	end
+	DesyncBundle.hooks.saveAutoConfig()
+	task.spawn(function()
+		respawnPlayerForDesync(LocalPlayer)
+		for _, delay in ipairs({ 0.12, 0.45, 1.2 }) do
+			task.wait(delay)
+			if not desyncActive then
+				return
+			end
+			local ch = LocalPlayer.Character
+			if ch and (not DesyncPhys.invisiblePart or not DesyncPhys.invisiblePart.Parent) then
+				setupDesyncCharacter(ch)
+				if DesyncPhys.invisiblePart and DesyncPhys.invisiblePart.Parent then
+					break
+				end
+			end
+		end
+		task.wait(3.5)
+		if not desyncActive then
+			return
+		end
+		local ch = LocalPlayer.Character
+		if ch and (not DesyncPhys.invisiblePart or not DesyncPhys.invisiblePart.Parent) then
+			setupDesyncCharacter(ch)
+		end
+	end)
+end
+
+function DesyncBundle.toggleDesyncSession()
+	if desyncActive then
+		DesyncBundle.stopDesyncSession()
+	else
+		DesyncBundle.startDesyncSession()
+	end
+end
+
+DesyncBundle.snapFollower = snapDesyncFollowerIfActive
+DesyncBundle.setupCharacter = setupDesyncCharacter
+DesyncBundle.isActive = function()
+	return desyncActive
+end
+DesyncBundle.getMovementSpeedForPhysics = getMovementSpeedForPhysics
+
+-- Same as script-b.lua "Main Speed Loop": speed customizer applies HRP velocity when moving.
+-- Without this, ENABLE + walk/steal values only affect desync's follower loop, not normal play.
+RunService.Heartbeat:Connect(function()
+	local speedMenuOn = DesyncBundle.Flags.Speed and DesyncBundle.SpeedSettings.Enabled
+	if not speedMenuOn then
+		return
+	end
+	if DesyncBundle.autoPlayRunning then
+		return
+	end
+	local character = LocalPlayer.Character
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root or not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	if humanoid.MoveDirection.Magnitude <= 0 then
+		return
+	end
+	local moveDir = humanoid.MoveDirection
+	local spd = getMovementSpeedForPhysics(character)
+	root.AssemblyLinearVelocity = Vector3.new(
+		moveDir.X * spd,
+		root.AssemblyLinearVelocity.Y,
+		moveDir.Z * spd
+	)
+end)
+
+local function saveConfig()
+	pcall(function()
+		DesyncBundle.hooks.saveAutoConfig()
+	end)
+end
+
+local function makeDraggable(obj, parent, saveKey)
+	if not obj or not parent then
+		return
+	end
+	local dragging, dragStart, startPos, moved
+	obj.InputBegan:Connect(function(input)
+		if DesyncBundle.Flags.UiLock then
+			return
+		end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			moved = false
+			dragStart = input.Position
+			startPos = parent.Position
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			parent.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+			moved = true
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+			if moved and saveKey then
+				uiPosState[saveKey] = {
+					xs = parent.Position.X.Scale,
+					xo = parent.Position.X.Offset,
+					ys = parent.Position.Y.Scale,
+					yo = parent.Position.Y.Offset,
+				}
+				saveConfig()
+			end
+		end
+	end)
+end
+
+local function buildSpeedCustomizerPanel(screenGui, SpeedMain)
+	SpeedMain.Name = "SpeedCustomizer_V18"
+	SpeedMain.Size = UDim2.new(0, 220, 0, 42)
+	SpeedMain.Position = posToUDim2(uiPosState.SpeedMain) or UDim2.new(0.5, 80, 0.4, 0)
+	SpeedMain.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	SpeedMain.ClipsDescendants = true
+	SpeedMain.Visible = true
+	Instance.new("UICorner", SpeedMain).CornerRadius = UDim.new(0, 10)
+	local MainGrad = Instance.new("UIGradient", SpeedMain)
+	MainGrad.Color = Theme.BGGradient
+
+	local MainStroke = Instance.new("UIStroke", SpeedMain)
+	MainStroke.Thickness = 2
+	MainStroke.Color = Color3.fromRGB(60, 60, 65)
+	local StrokeGrad = Instance.new("UIGradient", MainStroke)
+	StrokeGrad.Color = Theme.SilverGradient
+
+	local PulseFrame = Instance.new("Frame", SpeedMain)
+	PulseFrame.Size = UDim2.new(1, 0, 1, 0)
+	PulseFrame.BackgroundColor3 = Color3.new(1, 1, 1)
+	PulseFrame.BackgroundTransparency = 1
+	PulseFrame.ZIndex = 0
+	Instance.new("UICorner", PulseFrame).CornerRadius = UDim.new(0, 10)
+
+	local function RunPulse()
+		PulseFrame.Size = UDim2.new(1, 0, 1, 0)
+		PulseFrame.Position = UDim2.new(0, 0, 0, 0)
+		PulseFrame.BackgroundTransparency = 0.8
+		TweenService:Create(PulseFrame, TweenInfo.new(0.6), {
+			Size = UDim2.new(1.1, 0, 1.2, 0),
+			Position = UDim2.new(-0.05, 0, -0.1, 0),
+			BackgroundTransparency = 1,
+		}):Play()
+	end
+
+	local Header = Instance.new("TextButton", SpeedMain)
+	Header.Name = "Header"
+	Header.Size = UDim2.new(1, 0, 0, 42)
+	Header.BackgroundTransparency = 1
+	Header.Text = "  SPEED CUSTOMIZER"
+	Header.Font = Theme.Font
+	Header.TextColor3 = Theme.TextMain
+	Header.TextSize = 12
+	Header.TextXAlignment = Enum.TextXAlignment.Left
+
+	local Arrow = Instance.new("TextLabel", Header)
+	Arrow.Size = UDim2.new(0, 42, 1, 0)
+	Arrow.Position = UDim2.new(1, -42, 0, 0)
+	Arrow.BackgroundTransparency = 1
+	Arrow.Text = "V"
+	Arrow.Font = Theme.Font
+	Arrow.TextColor3 = Theme.TextDark
+	Arrow.TextSize = 10
+
+	local Content = Instance.new("Frame", SpeedMain)
+	Content.Name = "Content"
+	Content.Position = UDim2.new(0, 0, 0, 42)
+	Content.Size = UDim2.new(1, 0, 0, 160)
+	Content.BackgroundTransparency = 1
+
+	local function CreateRow(parent, text, pos)
+		local Frame = Instance.new("Frame", parent)
+		Frame.Size = UDim2.new(1, -20, 0, 40)
+		Frame.Position = UDim2.new(0, 10, 0, pos)
+		Frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+		Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 8)
+		local Label = Instance.new("TextLabel", Frame)
+		Label.Size = UDim2.new(1, -70, 1, 0)
+		Label.Position = UDim2.new(0, 12, 0, 0)
+		Label.Text = text:upper()
+		Label.TextColor3 = Theme.TextMain
+		Label.Font = Theme.Font
+		Label.TextSize = 11
+		Label.TextXAlignment = Enum.TextXAlignment.Left
+		Label.BackgroundTransparency = 1
+		return Frame
+	end
+
+	local ToggleRow = CreateRow(Content, "ENABLE", 10)
+	local Switch = Instance.new("TextButton", ToggleRow)
+	Switch.Size = UDim2.new(0, 38, 0, 20)
+	Switch.Position = UDim2.new(1, -50, 0.5, -10)
+	Switch.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+	Switch.Text = ""
+	Instance.new("UICorner", Switch).CornerRadius = UDim.new(1, 0)
+
+	local Knob = Instance.new("Frame", Switch)
+	Knob.Size = UDim2.new(0, 14, 0, 14)
+	Knob.Position = UDim2.new(0, 3, 0.5, -7)
+	Knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	Instance.new("UICorner", Knob).CornerRadius = UDim.new(1, 0)
+
+	DesyncBundle.SpeedSettings._syncInnerUi = function()
+		local en = DesyncBundle.SpeedSettings.Enabled
+		local goal = en and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
+		Knob.Position = goal
+		Switch.BackgroundColor3 = en and Color3.fromRGB(120, 120, 125) or Color3.fromRGB(45, 45, 50)
+	end
+
+	local lastSpeedInnerTap = 0
+	Switch.Activated:Connect(function()
+		if tick() - lastSpeedInnerTap < 0.28 then
+			return
+		end
+		lastSpeedInnerTap = tick()
+		if not DesyncBundle.Flags.Speed then
+			return
+		end
+		DesyncBundle.SpeedSettings.Enabled = not DesyncBundle.SpeedSettings.Enabled
+		local goal = DesyncBundle.SpeedSettings.Enabled and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
+		TweenService:Create(Knob, TweenInfo.new(0.3), { Position = goal }):Play()
+		Switch.BackgroundColor3 = DesyncBundle.SpeedSettings.Enabled and Color3.fromRGB(120, 120, 125) or Color3.fromRGB(45, 45, 50)
+		if DesyncBundle.SpeedSettings.Enabled then
+			RunPulse()
+		end
+		saveConfig()
+	end)
+	DesyncBundle.SpeedSettings._syncInnerUi()
+
+	local function AddInput(text, default, pos, callback)
+		local Row = CreateRow(Content, text, pos)
+		Row:FindFirstChildOfClass("TextLabel").TextColor3 = Theme.TextDark
+		local Box = Instance.new("TextBox", Row)
+		Box.Size = UDim2.new(0, 60, 0, 24)
+		Box.Position = UDim2.new(1, -72, 0.5, -12)
+		Box.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+		Box.Text = default
+		Box.TextColor3 = Color3.fromRGB(100, 200, 255)
+		Box.Font = Enum.Font.Code
+		Box.TextSize = 12
+		Instance.new("UICorner", Box).CornerRadius = UDim.new(0, 4)
+		local s = Instance.new("UIStroke", Box)
+		s.Color = Theme.Border
+		s.Thickness = 1
+		Box.FocusLost:Connect(function()
+			local n = tonumber(Box.Text)
+			if n then
+				callback(n)
+				saveConfig()
+			else
+				Box.Text = default
+			end
+		end)
+		return Box
+	end
+
+	desyncSpeedBoxes.walk = AddInput("WALKSPEED", tostring(DesyncBundle.SpeedSettings.Speed), 55, function(v)
+		DesyncBundle.SpeedSettings.Speed = v
+	end)
+	desyncSpeedBoxes.steal = AddInput("STEAL SPD", tostring(DesyncBundle.SpeedSettings.Steal), 100, function(v)
+		DesyncBundle.SpeedSettings.Steal = v
+	end)
+
+	local expanded = false
+	local function toggleSpeedPanelExpand()
+		expanded = not expanded
+		local targetSize = expanded and UDim2.new(0, 220, 0, 195) or UDim2.new(0, 220, 0, 42)
+		TweenService:Create(Arrow, TweenInfo.new(0.3), { Rotation = expanded and 180 or 0 }):Play()
+		TweenService:Create(SpeedMain, TweenInfo.new(0.4, Enum.EasingStyle.Quart), { Size = targetSize }):Play()
+	end
+	-- Activated only: MouseButton1Click + drag on same header can eat touches on mobile.
+	Header.Activated:Connect(toggleSpeedPanelExpand)
+
+	return Header
+end
+
+local function buildDesyncPanel(screenGui)
+	local DesyncMain = Instance.new("Frame", screenGui)
+	DesyncMain.Name = "DesyncPanel_V18"
+	local dsHeaderH = ui(42, 34)
+	DesyncMain.Size = UDim2.new(0, ui(300, 238), 0, dsHeaderH)
+	DesyncMain.Position = posToUDim2(uiPosState.DesyncMain) or UDim2.new(0.5, ui(200, 120), ui(0.26, 0.20), 0)
+	DesyncMain.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	DesyncMain.ClipsDescendants = true
+	DesyncMain.Visible = true
+	Instance.new("UICorner", DesyncMain).CornerRadius = UDim.new(0, 10)
+	Instance.new("UIGradient", DesyncMain).Color = Theme.BGGradient
+	local DSStroke = Instance.new("UIStroke", DesyncMain)
+	DSStroke.Thickness = 2
+	DSStroke.Color = Color3.fromRGB(60, 60, 65)
+	Instance.new("UIGradient", DSStroke).Color = Theme.SilverGradient
+
+	local DSHeader = Instance.new("Frame", DesyncMain)
+	DSHeader.Name = "DesyncHeaderBar"
+	DSHeader.Size = UDim2.new(1, 0, 0, dsHeaderH)
+	DSHeader.BackgroundTransparency = 1
+
+	local DSTitleDrag = Instance.new("TextButton", DSHeader)
+	DSTitleDrag.Name = "DesyncTitleDrag"
+	DSTitleDrag.Size = UDim2.new(1, ui(-118, -96), 1, 0)
+	DSTitleDrag.Position = UDim2.new(0, 0, 0, 0)
+	DSTitleDrag.BackgroundTransparency = 1
+	DSTitleDrag.Text = "  DESYNC"
+	DSTitleDrag.Font = Theme.Font
+	DSTitleDrag.TextColor3 = Theme.TextMain
+	DSTitleDrag.TextSize = 12
+	DSTitleDrag.TextXAlignment = Enum.TextXAlignment.Left
+	DSTitleDrag.AutoButtonColor = false
+
+	local DSHeaderToggleBtn = Instance.new("TextButton", DSHeader)
+	DSHeaderToggleBtn.Size = UDim2.new(0, ui(64, 56), 0, ui(24, 22))
+	DSHeaderToggleBtn.Position = UDim2.new(1, ui(-112, -98), 0.5, ui(-12, -11))
+	DSHeaderToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+	DSHeaderToggleBtn.Text = "OFF"
+	DSHeaderToggleBtn.TextColor3 = Theme.TextMain
+	DSHeaderToggleBtn.Font = Theme.Font
+	DSHeaderToggleBtn.TextSize = ui(10, 9)
+	DSHeaderToggleBtn.AutoButtonColor = false
+	DSHeaderToggleBtn.ZIndex = 2
+	Instance.new("UICorner", DSHeaderToggleBtn).CornerRadius = UDim.new(0, 6)
+	local DSHeaderToggleStroke = Instance.new("UIStroke", DSHeaderToggleBtn)
+	DSHeaderToggleStroke.Color = Theme.Border
+	DSHeaderToggleStroke.Thickness = 1.5
+	local DSHeaderToggleStrokeGrad = Instance.new("UIGradient", DSHeaderToggleStroke)
+	DSHeaderToggleStrokeGrad.Color = Theme.SilverGradient
+
+	local function setDesyncHeaderButtonActive(running)
+		if running then
+			DSHeaderToggleBtn.Text = "ON"
+			DSHeaderToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 32, 20)
+			DSHeaderToggleStrokeGrad.Color = Theme.SilverGradient
+			DSHeaderToggleBtn.TextColor3 = Color3.fromRGB(130, 255, 130)
+		else
+			DSHeaderToggleBtn.Text = "OFF"
+			DSHeaderToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+			DSHeaderToggleStrokeGrad.Color = Theme.SilverGradient
+			DSHeaderToggleBtn.TextColor3 = Theme.TextMain
+		end
+	end
+
+	DesyncBundle.hooks.setUiActive = setDesyncHeaderButtonActive
+
+	local desyncToggleLock = false
+	local function onDesyncToggleBtn()
+		if desyncToggleLock then
+			return
+		end
+		desyncToggleLock = true
+		if desyncActive then
+			DesyncBundle.stopDesyncSession()
+		else
+			DesyncBundle.startDesyncSession()
+		end
+		task.defer(function()
+			desyncToggleLock = false
+		end)
+		saveConfig()
+	end
+	-- One handler only: Activated + MouseButton1Click both fire on many platforms → instant double-toggle (stays OFF).
+	DSHeaderToggleBtn.Activated:Connect(onDesyncToggleBtn)
+	DesyncBundle.toggleDesync = onDesyncToggleBtn
+	setDesyncHeaderButtonActive(false)
+
+	return DesyncMain, DSTitleDrag
+end
+
+local function buildBundleUi()
+	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+	pcall(function()
+		local old = playerGui:FindFirstChild("DarkHub_DesyncBundle_UI")
+		if old then
+			old:Destroy()
+		end
+	end)
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "DarkHub_DesyncBundle_UI"
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.DisplayOrder = 100
+	screenGui.IgnoreGuiInset = true
+	screenGui.Parent = playerGui
+
+	local SpeedMain = Instance.new("Frame", screenGui)
+	local Header = buildSpeedCustomizerPanel(screenGui, SpeedMain)
+	local DesyncMain, DSTitleDrag = buildDesyncPanel(screenGui)
+
+	makeDraggable(Header, SpeedMain, "SpeedMain")
+	makeDraggable(DSTitleDrag, DesyncMain, "DesyncMain")
+
+	DesyncBundle.ui = {
+		screenGui = screenGui,
+		speedMain = SpeedMain,
+		desyncMain = DesyncMain,
+	}
+end
+
+buildBundleUi()
+
+do
+	local g = (getgenv and getgenv()) or _G
+	if type(g) == "table" then
+		g.DarkHubDesyncBundle = DesyncBundle
+	end
+end
+
+return DesyncBundle
