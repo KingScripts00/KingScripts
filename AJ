@@ -1,0 +1,47 @@
+-- // CONFIGURACIÓN BOTS //
+local FIREBASE_URL = "https://steal-a-brainrot-8157c-default-rtdb.firebaseio.com/" 
+local PLACE_ID = 109983668079237
+local WEBHOOK_ALTO  = "https://discord.com/api/webhooks/1501729874543640627/xTBOmfIjCEoKH_owmhwMp_pnOdLV1aXdEV8-EEfMsTrhtr6XyvjDL2_qJW20xzZFleeN"
+local WEBHOOK_MEDIO = "https://discord.com/api/webhooks/1501729733203853423/0v8nuPbMmuS4tthFIi3pRkceTRvIfuCJ-Z9hXjKjqQGnS_LPeL19N6pCaWnxfNLqgVSQ"
+local WEBHOOK_BAJO  = "https://discord.com/api/webhooks/1501729423114768475/keiPpw2XtsgEC2h2fGdfq6b2uNVB2CPVoqVjV3ya0oiGK6FL9_6tUpZvPj4pyDy0yyc4"
+
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+
+-- Optimización extrema para 4GB RAM
+game:GetService("RunService"):Set3dRenderingEnabled(false)
+if setfpscap then setfpscap(5) end
+
+local function reportarTodo(nombre, valor)
+    local data = {["Nombre"] = nombre, ["Valor"] = valor, ["JobID"] = game.JobId, ["Time"] = os.time()}
+    local payload = HttpService:JSONEncode(data)
+    local req = http_request or request or (syn and syn.request)
+    
+    if req then
+        -- 1. Guardar en TU Firebase para el HUD
+        pcall(function()
+            req({Url = FIREBASE_URL .. "global_scans/" .. game.JobId .. ".json", Method = "PUT", Body = payload})
+        end)
+        
+        -- 2. Clasificar y enviar a Discord
+        local webhook = WEBHOOK_BAJO
+        local color = 255
+        if valor >= 50 then webhook = WEBHOOK_ALTO color = 16711680
+        elseif valor >= 20 then webhook = WEBHOOK_MEDIO color = 16776960 end
+
+        local discordData = {["embeds"] = {{["title"] = "Base Detectada", ["color"] = color, ["fields"] = {{["name"] = "Dueño", ["value"] = nombre, ["inline"] = true}, {["name"] = "M", ["value"] = valor.."M", ["inline"] = true}, {["name"] = "ID", ["value"] = "```"..game.JobId.."```"}}}}}
+        pcall(function() req({Url = webhook:gsub("discord.com", "webhook.lewisakura.moe"), Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(discordData)}) end)
+    end
+end
+
+task.wait(15)
+for _, v in pairs(workspace:GetDescendants()) do
+    if v:IsA("NumberValue") and (v.Name == "Value" or v.Name == "Money") and v.Parent:IsA("Configuration") then
+        local valorM = math.floor(v.Value / 1000000)
+        if valorM >= 1 then reportarTodo(v.Parent.Parent.Name, valorM) break end
+    end
+end
+
+task.wait(5)
+TeleportService:Teleport(PLACE_ID)
+
