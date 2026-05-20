@@ -1,0 +1,708 @@
+-- AngryHubResetRaknetDesync
+-- Logged by @fwexternet on Discord reconstructed by @fwexternet on discord logger by @wym_saying on Dc.
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- ==================== THEME CONFIG (RED) ====================
+local COL_WHITE = Color3.fromRGB(255, 255, 255)
+local ACCENT_KEYS = {
+	ColorSequenceKeypoint.new(0,    Color3.fromRGB(255, 30, 30)),   -- Dark Red
+	ColorSequenceKeypoint.new(0.3,  Color3.fromRGB(255, 80, 80)),   -- Mid Red
+	ColorSequenceKeypoint.new(0.6,  Color3.fromRGB(255, 140, 140)), -- Light Red
+	ColorSequenceKeypoint.new(1,    Color3.fromRGB(255, 30, 30)),   -- Dark Red
+}
+
+local titleGradient = Instance.new("UIGradient")
+titleGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0,    Color3.fromRGB(180, 10,  10)),   
+	ColorSequenceKeypoint.new(0.25, Color3.fromRGB(255, 60,  60)),   
+	ColorSequenceKeypoint.new(0.5,  Color3.fromRGB(255, 180, 180)),  
+	ColorSequenceKeypoint.new(0.75, Color3.fromRGB(255, 60,  60)),   
+	ColorSequenceKeypoint.new(1,    Color3.fromRGB(180, 10,  10)),   
+})
+titleGradient.Rotation = 0
+
+local strokeGradient = Instance.new("UIGradient")
+strokeGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0,    Color3.fromRGB(255, 30, 30)),   
+	ColorSequenceKeypoint.new(0.3,  Color3.fromRGB(255, 80, 80)),   
+	ColorSequenceKeypoint.new(0.6,  Color3.fromRGB(255, 140, 140)), 
+	ColorSequenceKeypoint.new(1,    Color3.fromRGB(255, 30, 30)),   
+})
+
+local function applyGradient(parent, keys)
+	local g = Instance.new("UIGradient")
+	g.Color = ColorSequence.new(keys or ACCENT_KEYS)
+	g.Parent = parent
+	return g
+end
+
+local function applyStroke(parent)
+	local s = Instance.new("UIStroke")
+	s.Thickness = 1.5
+	s.Color = COL_WHITE
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = parent
+	applyGradient(s)
+	return s
+end
+
+-- Clone gradients for multiple strokes to prevent parenting conflicts
+local statusBoxGradient = strokeGradient:Clone()
+local statusTextGradient = strokeGradient:Clone()
+local desyncBtnGradient = strokeGradient:Clone()
+local noAnimBtnGradient = strokeGradient:Clone()
+
+-- ==================== RIGHT PANEL (Main GUI) ====================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AngryResetDesyncGUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 235, 0, 178)
+mainFrame.Position = UDim2.new(1, -250, 0.32, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+mainFrame.BackgroundTransparency = 1.00 
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 14)
+mainCorner.Parent = mainFrame
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = COL_WHITE
+mainStroke.Thickness = 1.5
+mainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+mainStroke.Parent = mainFrame
+strokeGradient.Parent = mainStroke
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Text = "ANGRY HUB RESET RAKNET DESYNC"
+titleLabel.Font = Enum.Font.ArialBold
+titleLabel.TextSize = 11 
+titleLabel.TextColor3 = COL_WHITE
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Size = UDim2.new(1, -50, 0, 28)
+titleLabel.Position = UDim2.new(0, 14, 0, 8)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Parent = mainFrame
+titleGradient.Parent = titleLabel
+
+local dropdownBtn = Instance.new("TextButton")
+dropdownBtn.Size = UDim2.new(0, 26, 0, 26)
+dropdownBtn.Position = UDim2.new(1, -38, 0, 9)
+dropdownBtn.BackgroundTransparency = 1
+dropdownBtn.Text = "▼"
+dropdownBtn.TextColor3 = COL_WHITE
+dropdownBtn.Font = Enum.Font.ArialBold
+dropdownBtn.TextSize = 16
+dropdownBtn.Parent = mainFrame
+
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "ContentFrame"
+contentFrame.Size = UDim2.new(1, -16, 1, -48)
+contentFrame.Position = UDim2.new(0, 8, 0, 40)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 7)
+listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Parent = contentFrame
+
+local contentPadding = Instance.new("UIPadding")
+contentPadding.PaddingTop = UDim.new(0, 6)
+contentPadding.PaddingBottom = UDim.new(0, 10)
+contentPadding.Parent = contentFrame
+
+-- Desync Row
+local desyncRow = Instance.new("Frame")
+desyncRow.Size = UDim2.new(1, -10, 0, 26)
+desyncRow.BackgroundTransparency = 1
+desyncRow.LayoutOrder = 1
+desyncRow.Parent = contentFrame
+
+local desyncText = Instance.new("TextLabel")
+desyncText.Text = "DESYNC:"
+desyncText.Font = Enum.Font.GothamSemibold
+desyncText.TextSize = 12
+desyncText.TextColor3 = COL_WHITE
+desyncText.TextXAlignment = Enum.TextXAlignment.Left
+desyncText.Size = UDim2.new(0.42, 0, 1, 0)
+desyncText.BackgroundTransparency = 1
+desyncText.Parent = desyncRow
+
+local statusBox = Instance.new("TextLabel")
+statusBox.Size = UDim2.new(0.52, 0, 1, 0)
+statusBox.Position = UDim2.new(0.48, 0, 0, 0)
+statusBox.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+statusBox.BackgroundTransparency = 0.75 
+statusBox.Text = "OFF"
+statusBox.TextColor3 = COL_WHITE 
+statusBox.TextSize = 12
+statusBox.Font = Enum.Font.GothamSemibold
+statusBox.Parent = desyncRow
+
+local statusCorner = Instance.new("UICorner")
+statusCorner.CornerRadius = UDim.new(0, 6)
+statusCorner.Parent = statusBox
+
+-- RED OUTLINE FOR THE ACTIVE / OFF TEXT BOX
+local statusBoxStroke = Instance.new("UIStroke")
+statusBoxStroke.Thickness = 1.5
+statusBoxStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+statusBoxStroke.Parent = statusBox
+statusBoxGradient.Parent = statusBoxStroke
+
+-- RED OUTLINE FOR THE ACTIVE / OFF INLINE TEXT GLOW
+local statusTextStroke = Instance.new("UIStroke")
+statusTextStroke.Thickness = 1.2
+statusTextStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+statusTextStroke.Parent = statusBox
+statusTextGradient.Parent = statusTextStroke
+
+-- Toggle Desync Button
+local desyncBtn = Instance.new("TextButton")
+desyncBtn.Size = UDim2.new(1, -10, 0, 38)
+desyncBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+desyncBtn.BackgroundTransparency = 0.75 
+desyncBtn.Text = "TOGGLE DESYNC"
+desyncBtn.TextColor3 = COL_WHITE
+desyncBtn.TextSize = 12
+desyncBtn.Font = Enum.Font.ArialBold
+desyncBtn.LayoutOrder = 2
+desyncBtn.Parent = contentFrame
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 6)
+btnCorner.Parent = desyncBtn
+
+-- RED OUTLINE FOR DESYNC TOGGLE BUTTON
+local btnStroke = Instance.new("UIStroke")
+btnStroke.Thickness = 1.5
+btnStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+btnStroke.Parent = desyncBtn
+desyncBtnGradient.Parent = btnStroke
+
+-- No Anim Button
+local noAnimBtn = Instance.new("TextButton")
+noAnimBtn.Size = UDim2.new(1, -10, 0, 38)
+noAnimBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+noAnimBtn.BackgroundTransparency = 0.75 
+noAnimBtn.Text = "NO ANIM: OFF"
+noAnimBtn.TextColor3 = COL_WHITE
+noAnimBtn.TextSize = 12
+noAnimBtn.Font = Enum.Font.ArialBold
+noAnimBtn.LayoutOrder = 3
+noAnimBtn.Parent = contentFrame
+
+local noAnimCorner = Instance.new("UICorner")
+noAnimCorner.CornerRadius = UDim.new(0, 6)
+noAnimCorner.Parent = noAnimBtn
+
+-- RED OUTLINE FOR NO ANIMATION BUTTON
+local noAnimStroke = Instance.new("UIStroke")
+noAnimStroke.Thickness = 1.5
+noAnimStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+noAnimStroke.Parent = noAnimBtn
+noAnimBtnGradient.Parent = noAnimStroke
+
+-- ==================== WEB LINK BELOW MAIN GUI ====================
+local linkFrame = Instance.new("Frame")
+linkFrame.Size = UDim2.new(0, 235, 0, 20)
+linkFrame.Position = UDim2.new(1, -250, 0.32, 185)
+linkFrame.BackgroundTransparency = 1
+linkFrame.Parent = screenGui
+
+local linkLabel = Instance.new("TextLabel")
+linkLabel.Text = "ANGRY-HUB.LOVABLE.APP"
+linkLabel.Font = Enum.Font.GothamSemibold
+linkLabel.TextSize = 9.5 
+linkLabel.TextColor3 = Color3.fromRGB(180, 60, 60)
+linkLabel.Size = UDim2.new(1, 0, 1, 0)
+linkLabel.BackgroundTransparency = 1
+linkLabel.Parent = linkFrame
+
+
+-- ==================== TOP REPLACEMENT CONTAINER (Top Status Bar) ====================
+local topMainFrame = Instance.new("Frame")
+topMainFrame.Name = "TopMainContainer"
+topMainFrame.Size = UDim2.new(0, 480, 0, 42) 
+topMainFrame.Position = UDim2.new(0.5, -240, 0, 15)
+topMainFrame.BackgroundTransparency = 1 
+topMainFrame.BorderSizePixel = 0
+topMainFrame.Parent = screenGui
+
+Instance.new("UICorner", topMainFrame).CornerRadius = UDim.new(0, 6)
+applyStroke(topMainFrame)
+
+local topMainPadding = Instance.new("UIPadding")
+topMainPadding.PaddingLeft = UDim.new(0, 8)
+topMainPadding.PaddingRight = UDim.new(0, 8)
+topMainPadding.Parent = topMainFrame
+
+-- Left Icon
+local iconFrame = Instance.new("Frame")
+iconFrame.Size             = UDim2.new(0, 22, 0, 22)
+iconFrame.Position         = UDim2.new(0, 0, 0.5, -11)
+iconFrame.BackgroundTransparency = 1 
+iconFrame.BorderSizePixel  = 0
+iconFrame.Parent           = topMainFrame
+Instance.new("UICorner", iconFrame).CornerRadius = UDim.new(0, 4)
+applyStroke(iconFrame)
+
+local iconImage = Instance.new("ImageLabel")
+iconImage.Size                   = UDim2.new(1, 0, 1, 0)
+iconImage.BackgroundTransparency = 0 
+iconImage.Image                  = "rbxassetid://123605530050300" 
+iconImage.ScaleType              = Enum.ScaleType.Crop
+iconImage.Parent                 = iconFrame
+Instance.new("UICorner", iconImage).CornerRadius = UDim.new(0, 4)
+
+-- Center Text Trackers
+local textContainer = Instance.new("Frame")
+textContainer.Size                   = UDim2.new(0, 310, 0, 34)
+textContainer.Position               = UDim2.new(0, 30, 0.5, -17)
+textContainer.BackgroundTransparency = 1
+textContainer.ClipsDescendants       = true
+textContainer.Parent                 = topMainFrame
+
+local topTitleLabel = Instance.new("TextLabel")
+topTitleLabel.Size                   = UDim2.new(1, 0, 0, 18)
+topTitleLabel.Position               = UDim2.new(0, 0, 0, 0)
+topTitleLabel.BackgroundTransparency = 1
+topTitleLabel.TextXAlignment         = Enum.TextXAlignment.Left
+topTitleLabel.Font                   = Enum.Font.ArialBold
+topTitleLabel.TextSize               = 13 
+topTitleLabel.RichText               = false
+topTitleLabel.TextColor3             = COL_WHITE
+topTitleLabel.Text                   = "AngryHub  |  angry-hub.lovable.app"
+topTitleLabel.Parent                 = textContainer
+
+local topTitleGradient = Instance.new("UIGradient")
+topTitleGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0,    Color3.fromRGB(180, 10,  10)),   
+	ColorSequenceKeypoint.new(0.25, Color3.fromRGB(255, 60,  60)),   
+	ColorSequenceKeypoint.new(0.5,  Color3.fromRGB(255, 180, 180)),  
+	ColorSequenceKeypoint.new(0.75, Color3.fromRGB(255, 60,  60)),   
+	ColorSequenceKeypoint.new(1,    Color3.fromRGB(180, 10,  10)),   
+})
+topTitleGradient.Rotation = 0
+topTitleGradient.Parent = topTitleLabel
+
+local creditsLabel = Instance.new("TextLabel")
+creditsLabel.Size                   = UDim2.new(1, 0, 0, 12)
+creditsLabel.Position               = UDim2.new(0, 0, 0, 18)
+creditsLabel.BackgroundTransparency = 1
+creditsLabel.TextXAlignment         = Enum.TextXAlignment.Left
+creditsLabel.Font                   = Enum.Font.GothamSemibold
+creditsLabel.TextSize = 10
+creditsLabel.TextColor3             = COL_WHITE 
+creditsLabel.Text                   = "By: @rich_sponge"
+creditsLabel.Parent                 = textContainer
+
+local creditsGradient = Instance.new("UIGradient")
+creditsGradient.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0,    Color3.fromRGB(100, 5,  5)),   
+	ColorSequenceKeypoint.new(0.25, Color3.fromRGB(180, 10, 10)),  
+	ColorSequenceKeypoint.new(0.5,  Color3.fromRGB(255, 40, 40)),  
+	ColorSequenceKeypoint.new(0.75, Color3.fromRGB(180, 10, 10)),  
+	ColorSequenceKeypoint.new(1,    Color3.fromRGB(100, 5,  5)),   
+})
+creditsGradient.Rotation = 0
+creditsGradient.Parent = creditsLabel
+
+-- Divider
+local divider = Instance.new("Frame")
+divider.Size             = UDim2.new(0, 1, 0, 26)
+divider.Position         = UDim2.new(0, 350, 0.5, -13)
+divider.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+divider.BorderSizePixel  = 0
+divider.Parent           = topMainFrame
+applyGradient(divider)
+
+-- Right Side Stats Frame
+local statsFrame = Instance.new("Frame")
+statsFrame.Size                   = UDim2.new(0, 110, 0, 34)
+statsFrame.Position               = UDim2.new(0, 358, 0.5, -17)
+statsFrame.BackgroundTransparency = 1
+statsFrame.Parent                 = topMainFrame
+
+local statsLayout = Instance.new("UIListLayout")
+statsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+statsLayout.Padding   = UDim.new(0, 0)
+statsLayout.Parent    = statsFrame
+
+local function createStatLabel(name)
+	local label = Instance.new("TextLabel")
+	label.Name                   = name
+	label.Size                   = UDim2.new(1, 0, 0, 11)
+	label.BackgroundTransparency = 1
+	label.TextXAlignment         = Enum.TextXAlignment.Left
+	label.Font                   = Enum.Font.ArialBold
+	label.TextSize               = 10
+	label.TextColor3             = COL_WHITE
+	label.Parent                 = statsFrame
+	applyGradient(label)
+	return label
+end
+
+local fpsLabel    = createStatLabel("FPSLabel")
+local pingLabel   = createStatLabel("PingLabel")
+local desyncLabel = createStatLabel("DesyncLabel")
+
+fpsLabel.Text    = "FPS: --"
+pingLabel.Text   = "Ping: --ms"
+desyncLabel.Text = "Raknet dsync: Off"
+
+
+-- ==================== DESYNC TOGGLE HOOK ====================
+local function SetDesyncLabel(isOn)
+	desyncLabel.Text       = isOn and "Raknet dsync: On" or "Raknet dsync: Off"
+	desyncLabel.TextColor3 = isOn and Color3.fromRGB(80, 255, 120) or COL_WHITE
+end
+_G.SetDesyncLabel = SetDesyncLabel
+
+
+-- ==================== MULTIPLATFORM DRAGGING LOGIC ====================
+local dragging = false
+local dragInput, dragStart, startPos
+
+local function updateDrag(input)
+	local delta = input.Position - dragStart
+	local targetPosition = UDim2.new(
+		startPos.X.Scale, 
+		startPos.X.Offset + delta.X, 
+		startPos.Y.Scale, 
+		startPos.Y.Offset + delta.Y
+	)
+	
+	-- Keep main frame and its bottom web link bound together seamlessly
+	mainFrame.Position = targetPosition
+	linkFrame.Position = UDim2.new(targetPosition.X.Scale, targetPosition.X.Offset, targetPosition.Y.Scale, targetPosition.Y.Offset + 185)
+end
+
+mainFrame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = mainFrame.Position
+		
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		updateDrag(input)
+	end
+end)
+
+
+-- ==================== CORE FUNCTIONAL LOGIC ====================
+local desyncActive = false
+local noAnimActive = false
+local minimized = false
+local noAnimConnection = nil
+local serverVisualSphere = nil
+local positionTrackerConnection = nil
+
+local function updateDesyncUI()
+    if desyncActive then
+        statusBox.Text = "ACTIVE"
+        desyncBtn.Text = "DESYNC ACTIVE"
+		SetDesyncLabel(true)
+    else
+        statusBox.Text = "OFF"
+        desyncBtn.Text = "TOGGLE DESYNC"
+		SetDesyncLabel(false)
+    end
+end
+
+local function updateNoAnimUI()
+    noAnimBtn.Text = noAnimActive and "NO ANIM: ON" or "NO ANIM: OFF"
+end
+
+-- Function to handle tracking position markers
+local function updateServerPositionMarker(position)
+    if not serverVisualSphere then
+        -- Create a small red sphere visual marker
+        serverVisualSphere = Instance.new("Part")
+        serverVisualSphere.Name = "ServerPositionMarker"
+        serverVisualSphere.Shape = Enum.PartType.Ball
+        serverVisualSphere.Size = Vector3.new(1.2, 1.2, 1.2)
+        serverVisualSphere.Color = Color3.fromRGB(255, 30, 30)
+        serverVisualSphere.Material = Enum.Material.Neon
+        serverVisualSphere.Anchored = true
+        serverVisualSphere.CanCollide = false
+        serverVisualSphere.Parent = workspace
+        
+        -- Create visual Billboard text interface
+        local billboard = Instance.new("BillboardGui")
+        billboard.Size = UDim2.new(0, 150, 0, 30)
+        billboard.AlwaysOnTop = true
+        billboard.StudsOffset = Vector3.new(0, 2, 0)
+        billboard.Parent = serverVisualSphere
+        
+        local textLabel = Instance.new("TextLabel")
+        textLabel.Size = UDim2.new(1, 0, 1, 0)
+        textLabel.BackgroundTransparency = 1
+        textLabel.Text = "Server Position"
+        textLabel.Font = Enum.Font.GothamBold
+        textLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+        textLabel.TextSize = 12
+        textLabel.TextStrokeTransparency = 0.2
+        textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        textLabel.Parent = billboard
+    end
+    
+    serverVisualSphere.Position = position
+end
+
+-- Active Position Monitor Loop to catch Anti-cheat updates/Teleports
+local function startTrackingPosition(hrp)
+    if positionTrackerConnection then positionTrackerConnection:Disconnect() end
+    
+    -- Monitors the HumanoidRootPart's position dynamically
+    positionTrackerConnection = hrp:GetPropertyChangedSignal("Position"):Connect(function()
+        if desyncActive and hrp then
+            updateServerPositionMarker(hrp.Position)
+        end
+    end)
+end
+
+-- Function to completely hide and reset character immediately
+local function respawnCharacterInvisible()
+    local char = player.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            updateServerPositionMarker(hrp.Position)
+            startTrackingPosition(hrp)
+        end
+
+        -- Hides every visual part instantly so nothing drops or fractures visibly
+        for _, obj in pairs(char:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                obj.Transparency = 1
+                obj.CanCollide = false
+            elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                obj.Transparency = 1
+            elseif obj:IsA("BackgroundBlur") or obj:IsA("GuiObject") or obj:IsA("LayerCollector") then
+                -- Leave interface instances unaffected
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
+                obj.Enabled = false
+            elseif obj:IsA("Accoutrement") or obj:IsA("Accessory") then
+                obj:Destroy() -- Removes hats/hair instantly
+            end
+        end
+        
+        -- Kills the humanoid to trigger the native respawn after hiding parts
+        if char:FindFirstChild("Humanoid") then
+            char.Humanoid.Health = 0
+        end
+        task.wait(0.5)
+    end
+end
+
+local function toggleNoAnim(state)
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChild("Humanoid")
+    local animate = char:FindFirstChild("Animate")
+    if not hum or not animate then return end
+
+    if state then
+        if noAnimConnection then return end
+        
+        local idleAnimationObject = animate:FindFirstChild("idle") and animate.idle:FindFirstChildOfClass("Animation")
+        
+        noAnimConnection = RunService.RenderStepped:Connect(function()
+            local playingTracks = hum:GetPlayingAnimationTracks()
+            
+            for _, track in pairs(playingTracks) do
+                if not idleAnimationObject or track.Animation.AnimationId ~= idleAnimationObject.AnimationId then
+                    track:Stop()
+                end
+            end
+            
+            if idleAnimationObject then
+                local idleIsPlaying = false
+                for _, track in pairs(playingTracks) do
+                    if track.Animation.AnimationId == idleAnimationObject.AnimationId then
+                        idleIsPlaying = true
+                        track:AdjustSpeed(1)
+                        break
+                    end
+                end
+                
+                if not idleIsPlaying then
+                    local idleTrack = hum:LoadAnimation(idleAnimationObject)
+                    idleTrack.Looped = true
+                    idleTrack:Play()
+                end
+            end
+        end)
+    else
+        if noAnimConnection then
+            noAnimConnection:Disconnect()
+            noAnimConnection = nil
+        end
+    end
+end
+
+player.CharacterAdded:Connect(function(char)
+    local hrp = char:WaitForChild("HumanoidRootPart", 5)
+    if hrp and desyncActive then
+        startTrackingPosition(hrp)
+    end
+    
+    task.wait(1)
+    if noAnimActive then
+        toggleNoAnim(true)
+    end
+end)
+
+-- Desync Toggle Button Execution Hook
+desyncBtn.MouseButton1Click:Connect(function()
+    desyncActive = not desyncActive
+    updateDesyncUI()
+    
+    pcall(function()
+        if desyncActive then
+            if raknet and typeof(raknet.desync) == "function" then
+                raknet.desync(true)
+            elseif _G.raknet and typeof(_G.raknet.desync) == "function" then
+                _G.raknet.desync(true)
+            end
+            respawnCharacterInvisible() -- Performs hidden body part reset & tracking point drop
+        else
+            if raknet and typeof(raknet.desync) == "function" then
+                raknet.desync(false)
+            elseif _G.raknet and typeof(_G.raknet.desync) == "function" then
+                _G.raknet.desync(false)
+            end
+            if positionTrackerConnection then
+                positionTrackerConnection:Disconnect()
+                positionTrackerConnection = nil
+            end
+        end
+    end)
+end)
+
+noAnimBtn.MouseButton1Click:Connect(function()
+    noAnimActive = not noAnimActive
+    updateNoAnimUI()
+    toggleNoAnim(noAnimActive)
+end)
+
+dropdownBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        dropdownBtn.Text = "▲"
+        contentFrame.Visible = false
+        mainFrame:TweenSize(UDim2.new(0, 235, 0, 44), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true)
+    else
+        dropdownBtn.Text = "▼"
+        contentFrame.Visible = true
+        mainFrame:TweenSize(UDim2.new(0, 235, 0, 178), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.25, true)
+    end
+end)
+
+-- ==================== SCROLLING GRADIENT ANIMATION ====================
+local gradientOffset = 0
+
+RunService.RenderStepped:Connect(function(dt)
+	gradientOffset = (gradientOffset + dt * 0.35) % 1
+
+	local shift = gradientOffset
+	local function shifted(t)
+		return (t + shift) % 1
+	end
+
+	local dynamicColorSequence = ColorSequence.new({
+		ColorSequenceKeypoint.new(0,    Color3.fromRGB(180, 10, 10):Lerp(Color3.fromRGB(255, 180, 180), math.abs(math.sin(math.pi * (shifted(0)))))),
+		ColorSequenceKeypoint.new(0.25, Color3.fromRGB(180, 10, 10):Lerp(Color3.fromRGB(255, 180, 180), math.abs(math.sin(math.pi * (shifted(0.25)))))),
+		ColorSequenceKeypoint.new(0.5,  Color3.fromRGB(180, 10, 10):Lerp(Color3.fromRGB(255, 180, 180), math.abs(math.sin(math.pi * (shifted(0.5)))))),
+		ColorSequenceKeypoint.new(0.75, Color3.fromRGB(180, 10, 10):Lerp(Color3.fromRGB(255, 180, 180), math.abs(math.sin(math.pi * (shifted(0.75)))))),
+		ColorSequenceKeypoint.new(1,    Color3.fromRGB(180, 10, 10):Lerp(Color3.fromRGB(255, 180, 180), math.abs(math.sin(math.pi * (shifted(0.99)))))),
+	})
+
+	local creditColorSequence = ColorSequence.new({
+		ColorSequenceKeypoint.new(0,    Color3.fromRGB(100, 5, 5):Lerp(Color3.fromRGB(255, 40, 40), math.abs(math.sin(math.pi * (shifted(0)))))),
+		ColorSequenceKeypoint.new(0.25, Color3.fromRGB(100, 5, 5):Lerp(Color3.fromRGB(255, 40, 40), math.abs(math.sin(math.pi * (shifted(0.25)))))),
+		ColorSequenceKeypoint.new(0.5,  Color3.fromRGB(100, 5, 5):Lerp(Color3.fromRGB(255, 40, 40), math.abs(math.sin(math.pi * (shifted(0.5)))))),
+		ColorSequenceKeypoint.new(0.75, Color3.fromRGB(100, 5, 5):Lerp(Color3.fromRGB(255, 40, 40), math.abs(math.sin(math.pi * (shifted(0.75)))))),
+		ColorSequenceKeypoint.new(1,    Color3.fromRGB(100, 5, 5):Lerp(Color3.fromRGB(255, 40, 40), math.abs(math.sin(math.pi * (shifted(0.99)))))),
+	})
+
+	titleGradient.Color = dynamicColorSequence
+	topTitleLabel.Text = "AngryHub  |  angry-hub.lovable.app"
+	topTitleGradient.Color = dynamicColorSequence
+	creditsGradient.Color = creditColorSequence
+	
+	statusBoxGradient.Color = dynamicColorSequence
+	statusTextGradient.Color = dynamicColorSequence
+	desyncBtnGradient.Color = dynamicColorSequence
+	noAnimBtnGradient.Color = dynamicColorSequence
+end)
+
+-- ==================== LIVE STATS LOOP ====================
+local fpsCount = 0
+local nextTick = os.clock()
+
+local function getPing()
+	local ok, val = pcall(function()
+		return math.round(player:GetNetworkPing() * 1000)
+	end)
+	if ok and type(val) == "number" then return val end
+	return 0
+end
+
+RunService.RenderStepped:Connect(function()
+	fpsCount = fpsCount + 1
+
+	local now = os.clock()
+	if now >= nextTick then
+		fpsLabel.Text  = "FPS: " .. tostring(fpsCount)
+		fpsCount       = 0
+
+		local ping = getPing()
+		pingLabel.Text = "Ping: " .. tostring(ping) .. "ms"
+
+		if ping < 80 then
+			pingLabel.TextColor3 = Color3.fromRGB(80, 255, 120)
+		elseif ping < 150 then
+			pingLabel.TextColor3 = Color3.fromRGB(255, 220, 60)
+		else
+			pingLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+		end
+
+		nextTick = now + 1
+	end
+end)
+
+updateDesyncUI()
+updateNoAnimUI()
+
+print("Angry Hub Reset Raknet Desync Loaded with Mobile/PC Dragging support.")
